@@ -1,0 +1,19 @@
+[Unit]
+Description=RetroStation Player
+Wants=network-online.target
+After=network-online.target graphical.target
+
+[Service]
+Type=simple
+User=retrostation-player
+Group=retrostation-player
+WorkingDirectory=/opt/retrostation-player
+Environment=RETROSTATION_PLAYER_CONFIG_DIR=/etc/retrostation-player
+Environment=RETROSTATION_PLAYER_STATE_DIR=/var/lib/retrostation-player
+Environment=DISPLAY=:0
+ExecStart=/opt/retrostation-player/.venv/bin/waitress-serve --host=0.0.0.0 --port=5050 retrostation_player.app:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

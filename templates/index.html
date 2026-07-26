@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RetroStation Player</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="brand-header">
+      <div class="brand-lockup">
+        <img class="brand-mark" src="/static/logo.png" alt="RetroStation Player">
+        <p class="brand-overline">Browser-controlled IPTV display</p>
+      </div>
+    </header>
+
+
+    <section class="panel now-playing">
+      <div class="now-playing-info">
+        <span class="eyebrow">Now Playing</span>
+        <h2 id="current-channel">Nothing selected</h2>
+        <p id="player-state">Stopped</p>
+        <label class="checkbox-label autoplay-label">
+          <input id="autoplay-input" type="checkbox">
+          Autoplay saved channel on startup
+        </label>
+      </div>
+      <div class="playback-controls">
+        <div class="volume-control">
+          <button id="mute-button" type="button" aria-pressed="false">Mute</button>
+          <label for="volume-input">Volume <span id="volume-value">100%</span></label>
+          <input id="volume-input" type="range" min="0" max="100" step="1" value="100">
+          <p id="audio-control-note" class="audio-control-note" hidden></p>
+        </div>
+        <div class="controls">
+          <button id="restart-button" type="button">Restart</button>
+          <button id="stop-button" type="button" class="danger">Stop</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Search channels" aria-label="Search channels">
+        <button id="refresh-button" type="button">Refresh</button>
+      </div>
+      <p id="message" class="message"></p>
+      <div id="channel-list" class="channel-list" aria-live="polite"></div>
+    </section>
+
+    <footer class="page-footer">
+      <nav class="footer-nav">
+        <button id="logs-button" type="button" aria-expanded="false" aria-controls="logs-panel">Logs</button>
+        <button id="settings-button" type="button" aria-expanded="false" aria-controls="setup-panel">Settings</button>
+        <button id="about-button" type="button" aria-expanded="false" aria-controls="about-panel">About</button>
+      </nav>
+
+      <section id="logs-panel" class="panel logs-panel" hidden aria-labelledby="logs-heading" data-zero-w="{{ 'true' if is_zero_w else 'false' }}">
+        <div class="logs-heading">
+          <div>
+            <span class="eyebrow">Diagnostics</span>
+            <h2 id="logs-heading">Service Logs</h2>
+          </div>
+          <label class="checkbox-label logs-auto-refresh">
+            <input id="logs-auto-refresh" type="checkbox">
+            Auto-refresh
+          </label>
+        </div>
+        <div class="logs-toolbar">
+          <label>Source
+            <select id="logs-source">
+              <option value="runtime" selected>Current runtime</option>
+              <option value="journal">System journal (manual)</option>
+            </select>
+          </label>
+          <label>Level
+            <select id="logs-level">
+              <option value="all">All levels</option>
+              <option value="error">Errors</option>
+              <option value="warning">Warnings</option>
+              <option value="info">Information</option>
+              <option value="debug">Debug</option>
+            </select>
+          </label>
+          <label>Lines
+            <select id="logs-lines">
+              <option value="100">100</option>
+              <option value="200" selected>200</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+            </select>
+          </label>
+          <label class="logs-search-label">Search
+            <input id="logs-search" type="search" placeholder="Filter log text" maxlength="200">
+          </label>
+        </div>
+        <div class="logs-actions">
+          <button id="logs-refresh-button" type="button">Refresh Logs</button>
+          <button id="logs-download-button" type="button">Download</button>
+          <button id="logs-close-button" type="button">Close</button>
+        </div>
+        <p id="logs-message" class="message"></p>
+        <pre id="logs-output" class="logs-output" tabindex="0" aria-live="polite">Open the log viewer to load service logs.</pre>
+      </section>
+
+      <section id="setup-panel" class="panel setup-panel" hidden>
+        <h2>Settings</h2>
+        <p id="setup-message" class="message"></p>
+        <div class="setup-form">
+          <label for="m3u-url-input">M3U URL</label>
+          <input id="m3u-url-input" type="url" placeholder="http://ERSATZTV-HOST:8409/iptv/channels.m3u" autocomplete="off">
+
+          <div id="display-settings" class="display-settings">
+            <div id="display-resolution-setting" class="setting-field">
+              <label for="display-resolution-input">Display Resolution</label>
+              <select id="display-resolution-input"></select>
+              <p class="setting-note">Changing the display resolution may reduce picture quality or may not be supported by the connected display.</p>
+            </div>
+            <div id="zero-w-video-sizing-setting" class="setting-field" hidden>
+              <label for="zero-w-video-sizing-input">Video Sizing</label>
+              <select id="zero-w-video-sizing-input">
+                <option value="auto">Automatic / Preserve aspect</option>
+                <option value="stretch">Stretch to fill screen</option>
+              </select>
+              <p class="setting-note">Zero W only. Stretch may distort the picture and may not fill or scale correctly on televisions that interpret 480p HDMI as 4:3.</p>
+            </div>
+            <div id="crt-overscan-setting" class="setting-field">
+              <label for="crt-overscan-input">CRT Overscan</label>
+              <select id="crt-overscan-input">
+                <option value="none">None</option>
+                <option value="light">Light</option>
+                <option value="standard">Standard CRT</option>
+                <option value="heavy">Heavy Overscan</option>
+              </select>
+              <p class="setting-note">Shrinks the picture to keep text and graphics inside the visible area of older CRT televisions.</p>
+            </div>
+          </div>
+
+          <div class="setup-actions">
+            <button id="save-config-button" type="button">Save Settings</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="about-panel" class="panel about-panel" hidden aria-labelledby="about-heading">
+        <h2 id="about-heading">About</h2>
+        <p class="about-version">RetroStation Player <span class="version">v{{ version }}</span></p>
+        <section class="system-information" aria-labelledby="system-information-heading">
+          <div class="system-information-heading">
+            <h3 id="system-information-heading">System Information</h3>
+            <p>Detected hardware and runtime environment.</p>
+          </div>
+          <dl id="system-information-list" class="system-information-list">
+            <div><dt>Machine</dt><dd id="system-machine">Detecting…</dd></div>
+            <div><dt>Operating System</dt><dd id="system-os">—</dd></div>
+            <div><dt>Kernel</dt><dd id="system-kernel">—</dd></div>
+            <div><dt>Kernel Architecture</dt><dd id="system-kernel-architecture">—</dd></div>
+            <div><dt>Userspace Architecture</dt><dd id="system-userspace-architecture">—</dd></div>
+            <div><dt>Processor</dt><dd id="system-processor">—</dd></div>
+            <div><dt>CPU Cores</dt><dd id="system-cpu-cores">—</dd></div>
+            <div><dt>Memory</dt><dd id="system-memory">—</dd></div>
+            <div><dt>Display Mode</dt><dd id="system-display-mode">—</dd></div>
+            <div id="system-connector-row"><dt>Active Connector</dt><dd id="system-display-connector">—</dd></div>
+            <div id="system-resolution-row"><dt>Display Resolution</dt><dd id="system-display-resolution">—</dd></div>
+            <div><dt>Player Backend</dt><dd id="system-player-backend">—</dd></div>
+          </dl>
+        </section>
+      </section>
+
+      <p class="copyright">&copy; RetroStation Player contributors. All rights reserved.</p>
+    </footer>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+{
+  "m3u_url": "http://192.0.2.123:8409/iptv/channels.m3u",
+  "listen_host": "0.0.0.0",
+  "listen_port": 5050,
+  "autoplay": true,
+  "fullscreen": true,
+  "player_backend": "mpv",
+  "player_path": "mpv",
+  "player_extra_args": [
+    "--hwdec=auto-safe",
+    "--no-osc",
+    "--no-input-default-bindings"
+  ],
+  "request_timeout_seconds": 15,
+  "display_mode": "hdmi",
+  "display_connector": "",
+  "display_resolution": "",
+  "crt_overscan": "none",
+  "volume": 100,
+  "muted": false,
+  "audio_output": "analog",
+  "audio_device": "",
+  "audio_control_mode": "alsa",
+  "audio_card": 0,
+  "audio_control": "PCM",
+  "zero_w_video_sizing": "auto"
+}
