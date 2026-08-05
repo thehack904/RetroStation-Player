@@ -2,6 +2,27 @@
 
 All notable changes to RetroStation Player are documented here.
 
+## [0.2.0] - 2026-08-01
+
+### Added
+
+- Required installer acknowledgment explaining original Pi Zero W streaming limitations.
+- Persistent one-time Pi Zero W streaming-performance notice in the Web UI.
+- Automatic ALSA playback-mixer detection for `PCM`, `Speaker`, `Headphone`, and `Master`.
+- Browser cache prevention and versioned Web UI assets for reliable in-place upgrades.
+
+- Added **Reset All CRT Settings** for the original Pi Zero W to remove both KMS composite margins and legacy managed firmware overscan settings before reboot.
+
+- Added a Reboot Now/Later prompt after saving original Pi Zero W composite alignment.
+- Added a narrowly scoped Web UI reboot endpoint backed by the existing validated privileged helper.
+- HDMI alignment channel-preview workflow that keeps the tool open, applies the temporary underscan to the current channel, and allows returning to the test pattern before saving.
+- Interactive HDMI alignment test pattern with live mpv JSON IPC underscan adjustment.
+- HDMI Picture Size control with persistent 0–15% mpv underscan correction for televisions that crop HDMI edges.
+- Interactive CRT alignment tool for VLC composite output using generated 480-line and 576-line test patterns through `drm_vout`.
+- Revised CRT alignment patterns with large hard-edged block lettering, center-safe label placement, heavier borders, and simplified guides for composite CRT legibility.
+- Position, dimension, centering, reset, adjustable step-size, save, and cancel controls in the Web UI.
+- Persistent Custom Alignment overscan preference with independent left, right, top, and bottom padding values.
+
 ## [0.1.0] - 2026-07-19
 
 ### Added
@@ -43,6 +64,13 @@ All notable changes to RetroStation Player are documented here.
 
 ### Changed
 
+- Removed per-channel `ffprobe` inspection so channel playback starts immediately without the previous 10–15 second probe delay.
+- Pi Zero W stream compatibility is now documented and acknowledged instead of being checked before every playback request.
+
+- Original Pi Zero W composite playback now avoids VLC runtime `croppadd` filtering during normal channel playback; saved CRT overscan and custom alignment are written as full-KMS `video=Composite-1:...margin_*` kernel command-line properties instead.
+
+- Removed the CRT alignment corner markers so the yellow Safe Area is the only rectangular alignment target.
+- Added an always-available CRT Alignment Close control, Escape-key support, and immediate panel dismissal with a time-limited background playback-cancel request.
 - The original Pi Zero W HDMI default is `1280x720@59.94`, followed by `1280x720@60`, `720x480`, and `640x480` fallbacks.
 - Zero W resolution labels and warnings distinguish widescreen, lower-load SD, and compatibility modes.
 - Stretch documentation now warns that the image may be distorted and may still fail to fill correctly when a television interprets 480p HDMI as 4:3.
@@ -58,6 +86,21 @@ All notable changes to RetroStation Player are documented here.
 
 ### Fixed
 
+- Added cache-busted Web UI assets and no-cache response headers so the Pi Zero W above-SD confirmation modal loads immediately after an upgrade.
+
+- Reboot prompts now appear only when Zero W composite boot-time display settings actually change; unrelated Settings saves no longer request a reboot.
+
+- Legacy firmware-only `overscan_*` settings being lost when full KMS took control of composite output.
+
+- Pi Zero W composite overscan saves now use an installer-managed root helper instead of attempting to write the Raspberry Pi boot configuration directly from the unprivileged service.
+- Severe Raspberry Pi Zero W composite stutter whenever any CRT overscan value enabled VLC's `croppadd` filter.
+
+- False HDMI alignment startup timeouts on the original Raspberry Pi Zero W by using a hardware-specific 20-second readiness window while mpv initializes.
+- HDMI alignment IPC failures caused by a missing mpv socket; the tool now uses a dedicated stable socket path, verifies the alignment process, and automatically recovers the test pattern when needed.
+- HDMI settings saves incorrectly validating the active HDMI resolution as a composite resolution.
+- HDMI Picture Size changes now apply automatically after the slider stops moving; no reboot is required.
+- CRT alignment pattern updated so the outer yellow box is the Safe Area target, while the corner markers remain the outer display-limit references.
+- CRT alignment guidance that incorrectly treated an inner yellow rectangle as the Safe Area; the outer box is now the Safe Area target and the corner markers represent the outer display limits.
 - Raspberry Pi composite playback failures under mpv by moving the validated composite path to VLC.
 - VLC composite overscan failures caused by DRM PRIME hardware-decoded frames.
 - ALSA commands with negative dB values by using the `--` option terminator.

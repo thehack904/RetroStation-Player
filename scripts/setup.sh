@@ -23,6 +23,8 @@ APPLY_PI_3B_PLUS_OPTIMIZATIONS=false
 ZERO_W_TUNING_UNIT="/etc/systemd/system/retrostation-player-zero-w-tuning.service"
 PI_3B_TUNING_UNIT="/etc/systemd/system/retrostation-player-pi-3b-tuning.service"
 PI_3B_PLUS_TUNING_UNIT="/etc/systemd/system/retrostation-player-pi-3b-plus-tuning.service"
+COMPOSITE_OVERSCAN_HELPER="/usr/local/libexec/retrostation-player-composite-overscan"
+COMPOSITE_OVERSCAN_SUDOERS="/etc/sudoers.d/retrostation-player-composite-overscan"
 
 usage() {
   cat >&2 <<'USAGE'
@@ -39,8 +41,8 @@ Display modes:
   drm        Use direct DRM/KMS output without requiring a specific connector.
 
 Options:
-  -y, --yes  Accept the detected-hardware optimization prompt and the
-             composite configuration prompt in auto mode.
+  -y, --yes  Acknowledge the streaming notice and accept detected-hardware
+             optimization and composite configuration prompts.
   --purge     With uninstall, also remove configuration, state, service user,
               and installer-created Raspberry Pi boot configuration backups.
   -h, --help Show this help.
@@ -150,6 +152,35 @@ is_pi_3b_plus() {
   local compatible_file="/proc/device-tree/compatible"
   [[ -r "$compatible_file" ]] || return 1
   tr '\0' '\n' < "$compatible_file" | grep -Fqx 'raspberrypi,3-model-b-plus'
+}
+
+
+prompt_streaming_notice() {
+  cat <<'STREAMING_NOTICE'
+
+Streaming performance notice
+
+RetroStation Player does not transcode or reduce the incoming video stream.
+Playback performance depends on the Raspberry Pi model, output mode, stream
+resolution, bitrate, codec, and whether hardware decoding is available.
+
+The original Raspberry Pi Zero W is intended for SD playback. Streams above
+720x480, high-bitrate streams, or unsupported formats may stutter, buffer, lose
+synchronization, or fail to play smoothly, especially over composite output.
+RetroStation Player starts channels immediately and does not inspect each stream
+with ffprobe before playback.
+STREAMING_NOTICE
+
+  if [[ "$ASSUME_YES" == true ]]; then
+    echo "--yes specified; streaming performance notice acknowledged."
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    fatal "Non-interactive installation requires --yes to acknowledge the streaming performance notice."
+  fi
+  local answer
+  read -r -p "Type YES to acknowledge this streaming performance notice: " answer
+  [[ "$answer" == "YES" ]] || fatal "Streaming performance notice was not acknowledged. Installation cancelled."
 }
 
 prompt_zero_w_optimizations() {
@@ -728,7 +759,7 @@ ensure_system_packages() {
 
   local required_command package installed_version candidate_version candidate_policy
   local required_commands=(apt-get apt-cache dpkg-query dpkg)
-  local packages=(python3 python3-venv mpv alsa-utils socat)
+  local packages=(python3 python3-venv mpv alsa-utils socat sudo)
   if [[ ( "$IS_PI_ZERO_W" == true && "$APPLY_ZERO_W_OPTIMIZATIONS" == true ) ||
         ( "$IS_PI_3B" == true && "$APPLY_PI_3B_OPTIMIZATIONS" == true ) ||
         ( "$IS_PI_3B_PLUS" == true && "$APPLY_PI_3B_PLUS_OPTIMIZATIONS" == true ) ]]; then
@@ -736,6 +767,9 @@ ensure_system_packages() {
   fi
   if [[ "$DISPLAY_MODE" == "composite" ]]; then
     packages+=(vlc)
+    if [[ "$IS_PI_ZERO_W" == true ]]; then
+      packages+=(ffmpeg)
+    fi
   fi
   local package_installed_status="install ok installed"
   local apt_update_success_stamp="/var/lib/apt/periodic/update-success-stamp"
@@ -829,7 +863,7 @@ if mode == "composite":
     data["audio_device"] = ""
     data["audio_control_mode"] = "alsa"
     data.setdefault("audio_card", 0)
-    data.setdefault("audio_control", "PCM")
+    data.setdefault("audio_control", "auto")
 else:
     args = list(data.get("player_extra_args", legacy_args))
     managed_prefixes = (
@@ -893,6 +927,19 @@ PYMODE
       echo "Detected display resolution: $detected_mode"
     fi
   fi
+}
+
+install_composite_overscan_helper() {
+  local source_helper="$INSTALL_DIR/scripts/retrostation-player-composite-overscan-helper"
+  [[ -f "$source_helper" ]] || fatal "Composite overscan helper is missing: $source_helper"
+  install -d -m 755 -o root -g root "$(dirname "$COMPOSITE_OVERSCAN_HELPER")"
+  install -m 755 -o root -g root "$source_helper" "$COMPOSITE_OVERSCAN_HELPER"
+  cat > "$COMPOSITE_OVERSCAN_SUDOERS" <<EOF_SUDOERS
+$SERVICE_USER ALL=(root) NOPASSWD: $COMPOSITE_OVERSCAN_HELPER *
+EOF_SUDOERS
+  chmod 440 "$COMPOSITE_OVERSCAN_SUDOERS"
+  chown root:root "$COMPOSITE_OVERSCAN_SUDOERS"
+  visudo -cf "$COMPOSITE_OVERSCAN_SUDOERS" >/dev/null || fatal "Generated sudoers rule is invalid: $COMPOSITE_OVERSCAN_SUDOERS"
 }
 
 write_service_file() {
@@ -966,6 +1013,8 @@ cmd_install() {
   [[ $EUID -eq 0 ]] || fatal "Run this installer as root (sudo)."
   command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]] || fatal "systemd is required."
 
+  prompt_streaming_notice
+
   if is_original_pi_zero_w; then
     prompt_zero_w_optimizations
   elif is_pi_3b; then
@@ -1030,6 +1079,7 @@ cmd_install() {
   chmod 750 "$CONFIG_DIR"
   chmod 660 "$CONFIG_DIR/config.json"
 
+  install_composite_overscan_helper
   write_service_file
   apply_zero_w_optimizations
   apply_pi_3b_optimizations
@@ -1041,8 +1091,10 @@ cmd_install() {
     systemctl start "$SERVICE_NAME" || true
   fi
 
-  local PLAYER_IP
+  local PLAYER_IP PLAYER_HOSTNAME PLAYER_FQDN
   PLAYER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')" || true
+  PLAYER_HOSTNAME="$(hostname 2>/dev/null)" || true
+  PLAYER_FQDN="$(hostname -f 2>/dev/null)" || true
 
   echo
   echo "RetroStation Player installed."
@@ -1052,6 +1104,12 @@ cmd_install() {
   echo "Service: $SERVICE_NAME"
   echo "Display mode: $DISPLAY_MODE"
   echo "Port: $PORT"
+  if [[ -n "${PLAYER_HOSTNAME:-}" ]]; then
+    echo "Hostname: $PLAYER_HOSTNAME"
+  fi
+  if [[ -n "${PLAYER_FQDN:-}" && "${PLAYER_FQDN:-}" != "${PLAYER_HOSTNAME:-}" ]]; then
+    echo "FQDN: $PLAYER_FQDN"
+  fi
   echo
   if [[ "$REBOOT_REQUIRED" == true ]]; then
     if [[ "$APPLY_ZERO_W_OPTIMIZATIONS" == true ]]; then
@@ -1074,9 +1132,16 @@ cmd_install() {
   if [[ -n "${PLAYER_IP:-}" ]]; then
     echo "Open the web interface to complete setup:"
     echo "  http://$PLAYER_IP:$PORT"
+    if [[ -n "${PLAYER_HOSTNAME:-}" ]]; then
+      echo "  http://$PLAYER_HOSTNAME.local:$PORT"
+    fi
   else
     echo "Open the web interface to complete setup:"
-    echo "  http://PLAYER-IP:$PORT"
+    if [[ -n "${PLAYER_HOSTNAME:-}" ]]; then
+      echo "  http://$PLAYER_HOSTNAME.local:$PORT"
+    else
+      echo "  http://PLAYER-IP:$PORT"
+    fi
   fi
 }
 
@@ -1125,6 +1190,8 @@ cmd_uninstall() {
   else
     systemctl disable --now "$SERVICE_NAME" 2>/dev/null || true
   fi
+
+  rm -f "$COMPOSITE_OVERSCAN_HELPER" "$COMPOSITE_OVERSCAN_SUDOERS"
 
   assert_safe_install_dir "$INSTALL_DIR"
   if [[ -d "$INSTALL_DIR" ]]; then

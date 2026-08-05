@@ -70,3 +70,11 @@ def test_zero_w_hdmi_modes_are_limited(monkeypatch):
     ]
     assert display.default_resolution('hdmi', ['1280x720@59.94', '720x480@60'], 'rpi-zero-w') == '1280x720@59.94'
     assert display.default_resolution('hdmi', ['720x480@60', '640x480@60'], 'rpi-zero-w') == '720x480@60'
+
+
+def test_custom_alignment_is_validated_per_edge():
+    values = display.normalize_custom_alignment(
+        {"left": 12, "right": 18, "top": 7, "bottom": 9}, "480i"
+    )
+    assert values == {"left": 12, "right": 18, "top": 7, "bottom": 9}
+    assert "custom" in display.valid_overscan_presets()

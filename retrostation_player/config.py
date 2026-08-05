@@ -23,6 +23,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "display_connector": "",
     "display_resolution": "",
     "crt_overscan": "none",
+    "crt_custom_alignment": {"left": 0, "right": 0, "top": 0, "bottom": 0},
+    "hdmi_underscan_percent": 0,
     "zero_w_video_sizing": "auto",
     "volume": 100,
     "muted": False,
@@ -30,7 +32,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "audio_device": "",
     "audio_control_mode": "alsa",
     "audio_card": 0,
-    "audio_control": "PCM",
+    "audio_control": "auto",
+    "streaming_notice_acknowledged": False,
 }
 
 
@@ -79,3 +82,50 @@ def save_config(updates: dict[str, Any]) -> None:
 
 def state_file() -> Path:
     return state_dir() / "state.json"
+
+
+
+COMPOSITE_OVERSCAN_HELPER = Path("/usr/local/libexec/retrostation-player-composite-overscan")
+
+
+def kernel_cmdline_path() -> Path:
+    for candidate in (Path("/boot/firmware/cmdline.txt"), Path("/boot/cmdline.txt")):
+        if candidate.exists():
+            return candidate
+    return Path("/boot/firmware/cmdline.txt")
+
+
+def _run_privileged_display_helper(arguments: list[str], timeout: int = 10) -> str:
+    import subprocess
+    command = ["sudo", "-n", str(COMPOSITE_OVERSCAN_HELPER), *arguments]
+    try:
+        completed = subprocess.run(
+            command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, timeout=timeout, check=False,
+        )
+    except FileNotFoundError as exc:
+        raise OSError("sudo is not installed") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise OSError("Timed out running the privileged display helper") from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise OSError(detail or "Privileged display helper failed")
+    return completed.stdout.strip()
+
+
+def save_zero_w_composite_overscan(resolution: str, values: dict[str, int] | None) -> Path:
+    """Write KMS composite margins to the kernel command line."""
+    arguments = ["disable", resolution]
+    if values and any(int(values.get(edge, 0)) for edge in ("left", "right", "top", "bottom")):
+        arguments = [resolution, *(str(int(values.get(edge, 0))) for edge in ("left", "right", "top", "bottom"))]
+    output = _run_privileged_display_helper(arguments)
+    return Path(output) if output else kernel_cmdline_path()
+
+
+def request_system_reboot() -> None:
+    _run_privileged_display_helper(["reboot"], timeout=5)
+
+
+def reset_zero_w_composite_overscan() -> str:
+    """Remove current KMS margins and the older managed firmware overscan block."""
+    return _run_privileged_display_helper(["reset-original"])

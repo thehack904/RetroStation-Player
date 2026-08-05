@@ -104,10 +104,27 @@ Available CRT overscan presets:
 - Light
 - Standard CRT
 - Heavy Overscan
+- Custom Alignment
 
-The CRT Overscan control appears only for composite installations.
+The CRT Overscan control appears only for composite installations. On the original Pi Zero W, saved CRT overscan is applied after a reboot through a managed full-KMS `video=Composite-1:...margin_*` entry in `/boot/firmware/cmdline.txt`. This keeps normal playback off VLC's expensive `croppadd` path. The installer adds a root-owned, narrowly scoped helper and sudoers rule so the Web service can update only that composite KMS entry or request a reboot.
 
-A reboot is required after composite output is first enabled or after purge restores the original Raspberry Pi boot configuration.
+### Interactive CRT alignment
+
+Composite installations using VLC include an **Open CRT Alignment Tool** button. The tool stops the current channel, displays a generated 480-line or 576-line test pattern through VLC `drm_vout`, and provides Web UI controls to:
+
+- Move the picture left, right, up, or down
+- Make the picture wider, narrower, taller, or shorter
+- Center or reset the alignment
+- Select 1, 2, 5, or 10-pixel adjustment steps
+
+The pattern uses three references:
+
+- The **outer yellow box** is the **Safe Area** and should be fully visible when alignment is complete.
+- The **circle** is a geometry reference and should remain round after resizing.
+
+Each adjustment restarts the test pattern so VLC applies the new `croppadd` values. **Save as Custom** stores independent left, right, top, and bottom values and selects **Custom Alignment** in the CRT Overscan list. **Stop & Close**, the heading **Close** button, or the Escape key closes the panel immediately and makes a time-limited background request to stop the test pattern and resume the previously selected channel. This prevents a stalled API request from trapping the alignment panel open.
+
+On the original Pi Zero W, saving CRT alignment displays **Reboot Now** and **Later** options. Choosing Later leaves a reminder in Settings. A reboot is also required after composite output is first enabled or after purge restores the original Raspberry Pi boot configuration.
 
 ---
 
@@ -115,7 +132,7 @@ A reboot is required after composite output is first enabled or after purge rest
 
 ### Analog and composite audio
 
-Raspberry Pi analog/composite audio uses the ALSA `PCM` mixer. The Web UI volume and mute controls apply immediately without restarting playback.
+Raspberry Pi analog/composite audio uses an ALSA playback mixer. RetroStation Player automatically detects common controls such as `PCM`, `Speaker`, `Headphone`, and `Master`. This supports USB audio adapters that do not expose a `PCM` control. The Web UI volume and mute controls apply immediately without restarting playback.
 
 ### HDMI audio
 
@@ -229,3 +246,13 @@ RetroStation Player is isolated from RetroStation MC and RetroIPTVGuide:
 | RetroIPTVGuide | `retroiptvguide.service` | 5000 | `/home/iptv/iptv-server` |
 | RetroStation MC | `retrostation-mc.service` | 8787 | `/home/iptv/retrostation-mc` |
 | RetroStation Player | `retrostation-player.service` | 5050 | `/opt/retrostation-player` |
+
+### HDMI overscan correction
+
+When a television crops the edges of HDMI video, open **Settings** and increase **HDMI Picture Size** from `0%` until the full picture is visible. The setting applies mpv underscan while preserving the source aspect ratio and is stored separately from CRT composite alignment. Use the smallest value that reveals the entire picture; typical corrections are approximately `2%` to `6%`. Slider changes are saved and applied to the current channel automatically after a short delay; a reboot is not required.
+
+### Interactive HDMI alignment
+
+The HDMI Alignment Tool displays a test pattern once and updates mpv live through JSON IPC while the underscan slider moves. Use **Preview Channel** to view the current channel with the temporary underscan while the tool remains open. **Return to Test Pattern** allows further adjustment before saving. Saving closes the tool and keeps the selected value.
+
+On the original Pi Zero W, use a 720×480 or lower source stream for the most reliable playback. Higher-resolution, high-bitrate, or unsupported streams may stutter or lose synchronization, especially over composite output. The installer and first Web UI visit require acknowledgment of this limitation; channels then start immediately without an `ffprobe` delay.

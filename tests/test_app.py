@@ -1,5 +1,7 @@
 import importlib
 
+import retrostation_player
+
 
 def test_index_renders_retrostation_branding(monkeypatch, tmp_path):
     monkeypatch.setenv("RETROSTATION_PLAYER_CONFIG_DIR", str(tmp_path / "config"))
@@ -19,3 +21,29 @@ def test_index_renders_retrostation_branding(monkeypatch, tmp_path):
     assert "Browser-controlled IPTV display" in page
     assert "Service Logs" in page
     assert "logs-button" in page
+
+
+def test_index_renders_package_version(monkeypatch, tmp_path):
+    monkeypatch.setenv("RETROSTATION_PLAYER_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("RETROSTATION_PLAYER_STATE_DIR", str(tmp_path / "state"))
+
+    app_module = importlib.import_module("retrostation_player.app")
+    monkeypatch.setattr("retrostation_player.player.state_file", lambda: tmp_path / "state" / "state.json")
+
+    response = app_module.app.test_client().get("/")
+    page = response.get_data(as_text=True)
+
+    assert f"v{retrostation_player.__version__}" in page
+
+
+def test_health_returns_package_version(monkeypatch, tmp_path):
+    monkeypatch.setenv("RETROSTATION_PLAYER_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("RETROSTATION_PLAYER_STATE_DIR", str(tmp_path / "state"))
+
+    app_module = importlib.import_module("retrostation_player.app")
+    monkeypatch.setattr("retrostation_player.player.state_file", lambda: tmp_path / "state" / "state.json")
+
+    response = app_module.app.test_client().get("/api/health")
+    data = response.get_json()
+
+    assert data["version"] == retrostation_player.__version__

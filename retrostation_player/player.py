@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import json
+import math
 import logging
 import os
 import subprocess
 import threading
+import socket
+import time
+import re
+from pathlib import Path
 from typing import Any
 
 from .channels import Channel
 from .config import state_file
-from .display import normalize_connector_name, overscan_padding, resolution_details
+from .display import normalize_connector_name, normalize_custom_alignment, overscan_padding, resolution_details
 
 logger = logging.getLogger("retrostation_player.player")
 
@@ -29,15 +34,17 @@ class MediaPlayer:
         display_connector: str = "",
         display_resolution: str = "",
         crt_overscan: str = "none",
+        crt_custom_alignment: dict[str, int] | None = None,
         volume: int = 100,
         muted: bool = False,
         audio_card: int = 0,
-        audio_control: str = "PCM",
+        audio_control: str = "auto",
         audio_output: str = "analog",
         audio_device: str = "",
         audio_control_mode: str = "alsa",
         hardware_profile: str = "default",
         zero_w_video_sizing: str = "auto",
+        hdmi_underscan_percent: int = 0,
     ) -> None:
         self.backend = backend.casefold()
         self.player_path = player_path
@@ -47,18 +54,28 @@ class MediaPlayer:
         self.display_connector = normalize_connector_name(display_connector)
         self.display_resolution = display_resolution
         self.crt_overscan = crt_overscan
+        self.crt_custom_alignment = dict(crt_custom_alignment or {"left": 0, "right": 0, "top": 0, "bottom": 0})
         self.volume = max(0, min(100, int(volume)))
         self.muted = bool(muted)
         self.audio_card = int(audio_card)
-        self.audio_control = str(audio_control).strip() or "PCM"
+        self.audio_control = str(audio_control).strip() or "auto"
+        self._resolved_audio_control: str | None = None
         self.audio_output = str(audio_output).strip().casefold() or "analog"
         self.audio_device = str(audio_device).strip()
         self.audio_control_mode = str(audio_control_mode).strip().casefold() or "alsa"
         self.hardware_profile = str(hardware_profile).strip().casefold() or "default"
         self.zero_w_video_sizing = str(zero_w_video_sizing).strip().casefold() or "auto"
+        self.hdmi_underscan_percent = max(0, min(15, int(hdmi_underscan_percent)))
         self._process: subprocess.Popen[bytes] | None = None
         self._channel: Channel | None = None
         self._lock = threading.RLock()
+        self._alignment_active = False
+        self._alignment_values = dict(self.crt_custom_alignment)
+        self._hdmi_alignment_active = False
+        self._hdmi_alignment_value = self.hdmi_underscan_percent
+        self._hdmi_alignment_original_value = self.hdmi_underscan_percent
+        self._hdmi_alignment_previewing = False
+        self._hdmi_alignment_socket = Path("/tmp/retrostation-player-hdmi-alignment.sock")
 
     def configure_output(
         self,
@@ -72,20 +89,31 @@ class MediaPlayer:
             if audio_device:
                 self.audio_device = str(audio_device).strip()
 
-    def configure_display(self, resolution: str, overscan: str, zero_w_video_sizing: str | None = None) -> None:
+    def configure_display(self, resolution: str, overscan: str, zero_w_video_sizing: str | None = None, custom_alignment: dict[str, int] | None = None, hdmi_underscan_percent: int | None = None) -> None:
         with self._lock:
             if self.display_mode == "composite":
                 resolution_details(resolution)
-                overscan_padding(resolution, overscan)
+                if overscan == "custom":
+                    normalize_custom_alignment(custom_alignment or self.crt_custom_alignment, resolution)
+                else:
+                    overscan_padding(resolution, overscan)
             elif not resolution:
                 raise ValueError("A display resolution is required")
             self.display_resolution = resolution
             self.crt_overscan = overscan
+            if custom_alignment is not None and self.display_mode == "composite":
+                self.crt_custom_alignment = normalize_custom_alignment(custom_alignment, resolution)
+                self._alignment_values = dict(self.crt_custom_alignment)
             if zero_w_video_sizing is not None:
                 sizing = str(zero_w_video_sizing).strip().casefold()
                 if sizing not in {"auto", "stretch"}:
                     raise ValueError("Unsupported Zero W video sizing mode")
                 self.zero_w_video_sizing = sizing
+            if hdmi_underscan_percent is not None:
+                value = int(hdmi_underscan_percent)
+                if not 0 <= value <= 15:
+                    raise ValueError("HDMI underscan must be from 0 to 15 percent")
+                self.hdmi_underscan_percent = value
 
     @staticmethod
     def _volume_to_db(volume: int) -> float:
@@ -93,14 +121,90 @@ class MediaPlayer:
         normalized = max(1, min(100, int(volume)))
         return -30.0 + ((normalized - 1) * 34.0 / 99.0)
 
+    def _detect_audio_control(self) -> str:
+        """Return a playback-capable ALSA mixer control for the selected card.
+
+        Older configurations commonly specify ``PCM``. USB audio adapters often
+        expose ``Speaker`` or ``Headphone`` instead, so an unavailable configured
+        control falls back to the best playback-capable control on the card.
+        """
+        if self._resolved_audio_control:
+            return self._resolved_audio_control
+
+        command = ["amixer", "-c", str(self.audio_card), "scontents"]
+        try:
+            completed = subprocess.run(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise PlayerError("amixer was not found; install the alsa-utils package") from exc
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise PlayerError(f"Unable to inspect ALSA mixer controls: {exc}") from exc
+
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout).strip()
+            raise PlayerError(
+                f"Unable to inspect ALSA card {self.audio_card}: {detail or 'amixer failed'}"
+            )
+
+        controls: dict[str, str] = {}
+        current_name: str | None = None
+        current_lines: list[str] = []
+        for line in completed.stdout.splitlines():
+            match = re.match(r"Simple mixer control '(.+)',\d+", line)
+            if match:
+                if current_name is not None:
+                    controls[current_name] = "\n".join(current_lines)
+                current_name = match.group(1)
+                current_lines = []
+            elif current_name is not None:
+                current_lines.append(line)
+        if current_name is not None:
+            controls[current_name] = "\n".join(current_lines)
+
+        playback_controls = {
+            name for name, details in controls.items()
+            if "Capabilities:" in details and ("pvolume" in details or "pswitch" in details)
+        }
+        configured = self.audio_control
+        if configured.casefold() != "auto" and configured in playback_controls:
+            selected = configured
+        else:
+            preferred = ("PCM", "Speaker", "Headphone", "Master", "Playback", "Digital")
+            selected = next((name for name in preferred if name in playback_controls), "")
+            if not selected and playback_controls:
+                selected = sorted(playback_controls)[0]
+
+        if not selected:
+            requested = "automatic detection" if configured.casefold() == "auto" else f"control '{configured}'"
+            raise PlayerError(
+                f"Unable to find a playback-capable ALSA mixer on card {self.audio_card} "
+                f"for {requested}"
+            )
+
+        if selected != configured:
+            logger.info(
+                "Using ALSA card %s control '%s' instead of configured control '%s'",
+                self.audio_card, selected, configured,
+            )
+        self._resolved_audio_control = selected
+        return selected
+
     def _run_amixer(self, *arguments: str) -> None:
+        control = self._detect_audio_control()
         command = [
             "amixer",
             "-q",
             "-c",
             str(self.audio_card),
             "sset",
-            self.audio_control,
+            control,
             *arguments,
         ]
         try:
@@ -122,7 +226,7 @@ class MediaPlayer:
             detail = (completed.stderr or completed.stdout).strip()
             raise PlayerError(
                 f"Unable to control ALSA card {self.audio_card} "
-                f"control '{self.audio_control}': {detail or 'amixer failed'}"
+                f"control '{control}': {detail or 'amixer failed'}"
             )
 
     def apply_audio(self) -> None:
@@ -133,8 +237,12 @@ class MediaPlayer:
                 self._run_amixer("mute")
                 return
 
-            decibels = self._volume_to_db(self.volume)
-            self._run_amixer("--", f"{decibels:.2f}dB", "unmute")
+            control = self._detect_audio_control()
+            if control == "PCM":
+                decibels = self._volume_to_db(self.volume)
+                self._run_amixer("--", f"{decibels:.2f}dB", "unmute")
+            else:
+                self._run_amixer(f"{self.volume}%", "unmute")
 
     def configure_audio(self, volume: int, muted: bool) -> None:
         with self._lock:
@@ -166,26 +274,185 @@ class MediaPlayer:
         except (OSError, json.JSONDecodeError, AttributeError):
             return None
 
-    def _vlc_display_args(self) -> list[str]:
+    def _vlc_display_args(self, custom_alignment: dict[str, int] | None = None) -> list[str]:
         mode, _, _ = resolution_details(self.display_resolution)
-        horizontal, vertical = overscan_padding(
-            self.display_resolution, self.crt_overscan
+        apply_runtime_overscan = not (
+            self.hardware_profile == "rpi-zero-w"
+            and self.display_mode == "composite"
+            and custom_alignment is None
         )
-        args = [
-            "--vout=drm_vout",
-            f"--drm-vout-mode={mode}",
-        ]
-        if horizontal or vertical:
-            args.extend(
-                [
-                    "--video-filter=croppadd",
-                    f"--croppadd-paddleft={horizontal}",
-                    f"--croppadd-paddright={horizontal}",
-                    f"--croppadd-paddtop={vertical}",
-                    f"--croppadd-paddbottom={vertical}",
-                ]
-            )
+        left = right = top = bottom = 0
+        if apply_runtime_overscan:
+            if custom_alignment is not None or self.crt_overscan == "custom":
+                values = normalize_custom_alignment(custom_alignment or self.crt_custom_alignment, self.display_resolution)
+                left, right, top, bottom = values["left"], values["right"], values["top"], values["bottom"]
+            else:
+                horizontal, vertical = overscan_padding(self.display_resolution, self.crt_overscan)
+                left = right = horizontal
+                top = bottom = vertical
+        args = ["--vout=drm_vout", f"--drm-vout-mode={mode}"]
+        if left or right or top or bottom:
+            args.extend([
+                "--video-filter=croppadd",
+                f"--croppadd-paddleft={left}", f"--croppadd-paddright={right}",
+                f"--croppadd-paddtop={top}", f"--croppadd-paddbottom={bottom}",
+            ])
         return args
+
+    def _start_process(self, command: list[str]) -> None:
+        try:
+            self._process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except FileNotFoundError as exc:
+            raise PlayerError(f"{self.backend} was not found at '{self.player_path}'") from exc
+        except OSError as exc:
+            raise PlayerError(f"Unable to start {self.backend}: {exc}") from exc
+
+    def start_alignment(self, values: dict[str, int] | None = None) -> dict[str, int]:
+        with self._lock:
+            if self.backend != "vlc" or self.display_mode != "composite":
+                raise PlayerError("CRT alignment requires VLC composite output")
+            normalized = normalize_custom_alignment(values or self.crt_custom_alignment, self.display_resolution)
+            self.stop(clear_channel=False)
+            _, _, height = resolution_details(self.display_resolution)
+            asset = "crt-alignment-576.png" if height >= 576 else "crt-alignment-480.png"
+            pattern = Path(__file__).resolve().parent.parent / "static" / asset
+            if not pattern.exists():
+                raise PlayerError(f"CRT alignment test pattern is missing: {pattern}")
+            command = [self.player_path, "--intf=dummy", "--no-video-title-show", "--no-osd", "--fullscreen", "--repeat", "--image-duration=-1", "--avcodec-hw=none"]
+            command.extend(self._vlc_display_args(normalized))
+            command.append(str(pattern))
+            self._start_process(command)
+            self._alignment_active = True
+            self._alignment_values = normalized
+            logger.info("CRT alignment pattern started with values %s", normalized)
+            return dict(normalized)
+
+    def update_alignment(self, values: dict[str, int]) -> dict[str, int]:
+        return self.start_alignment(values)
+
+    def finish_alignment(self, resume: bool = True) -> None:
+        with self._lock:
+            channel = self._channel
+            self.stop(clear_channel=False)
+            self._alignment_active = False
+        if resume and channel is not None:
+            self.play(channel)
+
+
+    @staticmethod
+    def _underscan_zoom(percent: int) -> float:
+        scale = 1.0 - (max(0, min(15, int(percent))) / 100.0)
+        return math.log2(scale)
+
+    def _send_mpv_ipc(self, command: list[Any]) -> None:
+        payload = (json.dumps({"command": command}) + "\n").encode()
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(2)
+                client.connect(str(self._hdmi_alignment_socket))
+                client.sendall(payload)
+                response = b""
+                while not response.endswith(b"\n"):
+                    chunk = client.recv(4096)
+                    if not chunk:
+                        break
+                    response += chunk
+        except OSError as exc:
+            raise PlayerError(f"Unable to communicate with HDMI alignment mpv: {exc}") from exc
+        result = json.loads(response.decode().strip() or "{}")
+        if result.get("error") not in {None, "success"}:
+            raise PlayerError(f"mpv rejected HDMI alignment update: {result.get('error')}")
+
+    def _hdmi_alignment_start_timeout(self) -> float:
+        """Allow slower HDMI/DRM initialization on the original Pi Zero W."""
+        return 20.0 if self.hardware_profile == "rpi-zero-w" else 4.0
+
+    def _start_hdmi_alignment_pattern_locked(self, value: int) -> None:
+        self.stop(clear_channel=False)
+        self._hdmi_alignment_socket.unlink(missing_ok=True)
+        pattern = Path(__file__).resolve().parent.parent / "static" / "hdmi-alignment-720.png"
+        command = [self.player_path, "--no-config", "--really-quiet", "--fullscreen", "--force-window=yes", "--keep-open=yes", "--loop-file=inf", "--image-display-duration=inf", "--vo=gpu", "--gpu-context=drm", f"--input-ipc-server={self._hdmi_alignment_socket}", "--video-align-x=0", "--video-align-y=0"]
+        if self.display_connector:
+            command.append(f"--drm-connector={self.display_connector}")
+        if self.display_resolution:
+            command.append(f"--drm-mode={self.display_resolution}")
+        command.extend([f"--video-zoom={self._underscan_zoom(value):.6f}", str(pattern)])
+        self._start_process(command)
+        deadline = time.monotonic() + self._hdmi_alignment_start_timeout()
+        while time.monotonic() < deadline and not self._hdmi_alignment_socket.exists():
+            if self._process is None or self._process.poll() is not None:
+                raise PlayerError("HDMI alignment pattern failed to start")
+            time.sleep(.05)
+        if not self._hdmi_alignment_socket.exists():
+            raise PlayerError("Timed out waiting for HDMI alignment mpv to become ready")
+        self._hdmi_alignment_previewing = False
+
+    def start_hdmi_alignment(self, percent: int | None = None) -> int:
+        with self._lock:
+            if self.backend != "mpv" or self.display_mode != "hdmi":
+                raise PlayerError("HDMI alignment requires HDMI output using mpv")
+            value = self.hdmi_underscan_percent if percent is None else max(0, min(15, int(percent)))
+            if not self._hdmi_alignment_active:
+                self._hdmi_alignment_original_value = self.hdmi_underscan_percent
+            self._hdmi_alignment_active = True
+            self._hdmi_alignment_value = value
+            self._start_hdmi_alignment_pattern_locked(value)
+            return value
+
+    def update_hdmi_alignment(self, percent: int) -> int:
+        with self._lock:
+            if not self._hdmi_alignment_active:
+                raise PlayerError("HDMI alignment is not active")
+            if self._hdmi_alignment_previewing:
+                raise PlayerError("Return to the test pattern before adjusting HDMI underscan")
+            value = max(0, min(15, int(percent)))
+
+            # The mpv IPC socket can disappear if mpv exits or the runtime
+            # directory is recreated. Recover by restarting only the alignment
+            # pattern with the requested value, then continue using live IPC.
+            process_alive = self._process is not None and self._process.poll() is None
+            if not process_alive or not self._hdmi_alignment_socket.exists():
+                self._start_hdmi_alignment_pattern_locked(value)
+            else:
+                try:
+                    self._send_mpv_ipc(["set_property", "video-zoom", self._underscan_zoom(value)])
+                except PlayerError:
+                    self._start_hdmi_alignment_pattern_locked(value)
+            self._hdmi_alignment_value = value
+            return value
+
+    def preview_hdmi_alignment(self, percent: int) -> int:
+        with self._lock:
+            if not self._hdmi_alignment_active:
+                raise PlayerError("HDMI alignment is not active")
+            channel = self._channel
+            if channel is None:
+                raise PlayerError("No channel is available to preview")
+            value = max(0, min(15, int(percent)))
+            self._hdmi_alignment_value = value
+            self.hdmi_underscan_percent = value
+            self.play(channel)
+            self._hdmi_alignment_previewing = True
+            return value
+
+    def return_to_hdmi_alignment_pattern(self) -> int:
+        with self._lock:
+            if not self._hdmi_alignment_active:
+                raise PlayerError("HDMI alignment is not active")
+            self._start_hdmi_alignment_pattern_locked(self._hdmi_alignment_value)
+            return self._hdmi_alignment_value
+
+    def finish_hdmi_alignment(self, resume: bool = True, commit: bool = False) -> None:
+        with self._lock:
+            channel = self._channel
+            self.stop(clear_channel=False)
+            if not commit:
+                self.hdmi_underscan_percent = self._hdmi_alignment_original_value
+            self._hdmi_alignment_active = False
+            self._hdmi_alignment_previewing = False
+            self._hdmi_alignment_socket.unlink(missing_ok=True)
+        if resume and channel is not None:
+            self.play(channel)
 
     def _build_command(self, channel: Channel) -> list[str]:
         if self.backend == "mpv":
@@ -198,7 +465,7 @@ class MediaPlayer:
             ]
             if self.fullscreen:
                 command.append("--fullscreen")
-            managed_prefixes = ("--drm-mode=", "--drm-connector=", "--audio-device=")
+            managed_prefixes = ("--drm-mode=", "--drm-connector=", "--audio-device=", "--video-zoom=", "--video-align-x=", "--video-align-y=")
             if self.hardware_profile == "rpi-zero-w" and self.display_mode == "hdmi":
                 managed_prefixes += (
                     "--profile=", "--vo=", "--gpu-context=", "--hwdec=",
@@ -232,8 +499,16 @@ class MediaPlayer:
                     command.append(f"--drm-connector={self.display_connector}")
                 if self.display_resolution:
                     command.append(f"--drm-mode={self.display_resolution}")
-                if self.display_mode == "hdmi" and self.audio_device:
-                    command.append(f"--audio-device=alsa/{self.audio_device}")
+                if self.display_mode == "hdmi":
+                    if self.hdmi_underscan_percent > 0:
+                        zoom = self._underscan_zoom(self.hdmi_underscan_percent)
+                        command.extend([
+                            f"--video-zoom={zoom:.6f}",
+                            "--video-align-x=0",
+                            "--video-align-y=0",
+                        ])
+                    if self.audio_device:
+                        command.append(f"--audio-device=alsa/{self.audio_device}")
         elif self.backend == "vlc":
             command = [
                 self.player_path,
@@ -269,20 +544,8 @@ class MediaPlayer:
         with self._lock:
             self.stop(clear_channel=False)
             command = self._build_command(channel)
-            try:
-                self._process = subprocess.Popen(
-                    command,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            except FileNotFoundError as exc:
-                raise PlayerError(
-                    f"{self.backend} was not found at '{self.player_path}'"
-                ) from exc
-            except OSError as exc:
-                raise PlayerError(f"Unable to start {self.backend}: {exc}") from exc
-
+            self._start_process(command)
+            self._alignment_active = False
             self._channel = channel
             self._write_state(playing=True)
             logger.info("Started %s for channel %s (%s), pid=%s", self.backend, channel.name, channel.number, self._process.pid)
@@ -326,6 +589,10 @@ class MediaPlayer:
                 "display_connector": self.display_connector,
                 "volume": self.volume,
                 "muted": self.muted,
+                "alignment_active": self._alignment_active,
+                "hdmi_alignment_active": self._hdmi_alignment_active,
+                "hdmi_alignment_value": self._hdmi_alignment_value,
+                "hdmi_alignment_previewing": self._hdmi_alignment_previewing,
                 "audio": {
                     "output": self.audio_output,
                     "device": self.audio_device,

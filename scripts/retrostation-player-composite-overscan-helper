@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+CMDLINE_CANDIDATES = (Path('/boot/firmware/cmdline.txt'), Path('/boot/cmdline.txt'))
+CONFIG_CANDIDATES = (Path('/boot/firmware/config.txt'), Path('/boot/config.txt'))
+LEGACY_START = '# BEGIN RetroStation Player composite overscan'
+LEGACY_END = '# END RetroStation Player composite overscan'
+CONNECTOR_PREFIX = 'video=Composite-1:'
+MODES = {
+    '480i': '720x480@60ie',
+    '576i': '720x576@50ie',
+    '240': '720x240@60e',
+    '288': '720x288@50e',
+}
+
+
+def fail(message: str) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(2)
+
+
+def cmdline_path() -> Path:
+    for path in CMDLINE_CANDIDATES:
+        if path.exists():
+            return path
+    fail('No Raspberry Pi kernel command-line file was found')
+
+
+
+
+def config_path() -> Path | None:
+    for path in CONFIG_CANDIDATES:
+        if path.exists():
+            return path
+    return None
+
+
+def remove_legacy_overscan_block() -> Path | None:
+    path = config_path()
+    if path is None:
+        return None
+    original = path.read_text(encoding='utf-8')
+    output: list[str] = []
+    inside = False
+    for line in original.splitlines():
+        stripped = line.strip()
+        if stripped == LEGACY_START:
+            inside = True
+            continue
+        if inside and stripped == LEGACY_END:
+            inside = False
+            continue
+        if not inside:
+            output.append(line)
+    temporary = path.with_name(path.name + '.retrostation-player.tmp')
+    temporary.write_text('\n'.join(output).rstrip() + '\n', encoding='utf-8')
+    os.chmod(temporary, path.stat().st_mode & 0o777)
+    os.replace(temporary, path)
+    return path
+
+
+def reset_original_display_settings() -> tuple[Path, Path | None]:
+    cmdline = write_cmdline('480i', None)
+    config = remove_legacy_overscan_block()
+    return cmdline, config
+
+def parse_alignment(argv: list[str]) -> tuple[str, dict[str, int] | None]:
+    if len(argv) == 2 and argv[0] == 'disable':
+        mode = argv[1]
+        if mode not in MODES:
+            fail(f'Unsupported composite mode: {mode}')
+        return mode, None
+    if len(argv) != 5:
+        fail('Usage: helper reboot | disable MODE | MODE LEFT RIGHT TOP BOTTOM')
+    mode = argv[0]
+    if mode not in MODES:
+        fail(f'Unsupported composite mode: {mode}')
+    names = ('left', 'right', 'top', 'bottom')
+    limits = {'left': 180, 'right': 180, 'top': 144, 'bottom': 144}
+    values: dict[str, int] = {}
+    for name, raw in zip(names, argv[1:]):
+        try:
+            value = int(raw)
+        except ValueError:
+            fail(f'{name} must be an integer')
+        if not 0 <= value <= limits[name]:
+            fail(f'{name} must be from 0 to {limits[name]}')
+        values[name] = value
+    return mode, values
+
+
+def write_cmdline(mode: str, values: dict[str, int] | None) -> Path:
+    path = cmdline_path()
+    original = path.read_text(encoding='utf-8').strip()
+    tokens = [token for token in original.split() if not token.startswith(CONNECTOR_PREFIX)]
+    if values and any(values.values()):
+        margins = ','.join([
+            f"margin_left={values['left']}",
+            f"margin_right={values['right']}",
+            f"margin_top={values['top']}",
+            f"margin_bottom={values['bottom']}",
+        ])
+        tokens.append(f'{CONNECTOR_PREFIX}{MODES[mode]},{margins}')
+    temporary = path.with_name(path.name + '.retrostation-player.tmp')
+    temporary.write_text(' '.join(tokens).strip() + '\n', encoding='utf-8')
+    os.chmod(temporary, path.stat().st_mode & 0o777)
+    os.replace(temporary, path)
+    return path
+
+
+def request_reboot() -> None:
+    completed = subprocess.run(
+        ['systemctl', 'reboot', '--no-block'],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        fail((completed.stderr or completed.stdout).strip() or 'Unable to request reboot')
+
+
+def main() -> None:
+    if os.geteuid() != 0:
+        fail('This helper must run as root')
+    argv = sys.argv[1:]
+    if argv == ['reboot']:
+        request_reboot()
+        print('reboot-requested')
+        return
+    if argv == ['reset-original']:
+        cmdline, config = reset_original_display_settings()
+        print(f'{cmdline}|{config or ""}')
+        return
+    mode, values = parse_alignment(argv)
+    print(write_cmdline(mode, values))
+
+
+if __name__ == '__main__':
+    main()

@@ -13,6 +13,7 @@ Completed items are retained here to show current project status. Version placem
 - [x] HDMI and DRM connector detection
 - [x] Display-resolution selection
 - [x] CRT overscan presets
+- [x] Interactive CRT alignment tool with saved custom per-edge alignment
 - [x] HDMI audio-device detection
 - [x] Dual-HDMI Raspberry Pi 4/5 support
 - [x] Runtime HDMI-port rebinding

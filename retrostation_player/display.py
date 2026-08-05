@@ -189,5 +189,26 @@ def overscan_padding(label: str, preset: str) -> tuple[int, int]:
     return round(width * horizontal), round(height * vertical)
 
 
+def normalize_custom_alignment(value: object, label: str) -> dict[str, int]:
+    """Validate and normalize custom CRT padding for a composite mode."""
+    _, width, height = resolution_details(label)
+    source = value if isinstance(value, dict) else {}
+    result: dict[str, int] = {}
+    limits = {"left": width // 4, "right": width // 4, "top": height // 4, "bottom": height // 4}
+    for edge, limit in limits.items():
+        try:
+            amount = int(source.get(edge, 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Custom CRT {edge} value must be an integer") from exc
+        if not 0 <= amount <= limit:
+            raise ValueError(f"Custom CRT {edge} value must be from 0 to {limit}")
+        result[edge] = amount
+    if width - result["left"] - result["right"] < 320:
+        raise ValueError("Custom CRT alignment leaves less than 320 visible horizontal pixels")
+    if height - result["top"] - result["bottom"] < 200:
+        raise ValueError("Custom CRT alignment leaves less than 200 visible vertical pixels")
+    return result
+
+
 def valid_overscan_presets() -> tuple[str, ...]:
-    return tuple(_OVERSCAN_PRESETS)
+    return (*_OVERSCAN_PRESETS, "custom")

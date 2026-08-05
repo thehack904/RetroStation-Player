@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RetroStation Player</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}">
 </head>
 <body>
   <main class="shell">
@@ -125,6 +125,12 @@
               </select>
               <p class="setting-note">Zero W only. Stretch may distort the picture and may not fill or scale correctly on televisions that interpret 480p HDMI as 4:3.</p>
             </div>
+            <div id="hdmi-underscan-setting" class="setting-field" hidden>
+              <label for="hdmi-underscan-input">HDMI Picture Size</label>
+              <input id="hdmi-underscan-input" type="range" min="0" max="15" step="1" value="0">
+              <p class="setting-note"><strong id="hdmi-underscan-value">0%</strong> underscan. Increase this only until the entire picture fits on screen. Aspect ratio is preserved. <span id="hdmi-underscan-status" aria-live="polite"></span></p>
+              <button id="hdmi-alignment-button" type="button" class="secondary-action">Open HDMI Alignment Tool</button>
+            </div>
             <div id="crt-overscan-setting" class="setting-field">
               <label for="crt-overscan-input">CRT Overscan</label>
               <select id="crt-overscan-input">
@@ -132,8 +138,10 @@
                 <option value="light">Light</option>
                 <option value="standard">Standard CRT</option>
                 <option value="heavy">Heavy Overscan</option>
+                <option value="custom">Custom Alignment</option>
               </select>
-              <p class="setting-note">Shrinks the picture to keep text and graphics inside the visible area of older CRT televisions.</p>
+              <p class="setting-note">Shrinks the picture to keep text and graphics inside the visible area of older CRT televisions.{% if is_zero_w %} <strong>Original Pi Zero W:</strong> saved CRT overscan is applied after a reboot so normal composite playback can remain smooth.{% endif %}</p>
+              <button id="crt-alignment-button" type="button" class="secondary-action">Open CRT Alignment Tool</button>{% if is_zero_w %}<button id="crt-reset-original-button" type="button" class="secondary-action">Reset All CRT Settings</button>{% endif %}
             </div>
           </div>
 
@@ -143,7 +151,49 @@
         </div>
       </section>
 
-      <section id="about-panel" class="panel about-panel" hidden aria-labelledby="about-heading">
+
+      <section id="hdmi-alignment-panel" class="panel alignment-panel" hidden aria-labelledby="hdmi-alignment-heading">
+        <div class="alignment-heading"><div><span class="eyebrow">HDMI Display</span><h2 id="hdmi-alignment-heading">HDMI Alignment Tool</h2></div><div class="alignment-heading-actions"><span id="hdmi-alignment-status" class="alignment-status">Test pattern inactive</span><button id="hdmi-alignment-close-button" type="button" class="alignment-close-button">Close</button></div></div>
+        <p>Adjust the test pattern live, then preview the current channel without closing this tool. Return to the pattern to refine the setting before saving.</p>
+        <div class="alignment-guide"><strong>How to align:</strong> Increase underscan until the yellow Safe Area box is completely visible. Use the smallest value that fits the whole box.</div>
+        <label for="hdmi-alignment-input">HDMI underscan <strong id="hdmi-alignment-value">0%</strong></label>
+        <input id="hdmi-alignment-input" type="range" min="0" max="15" step="1" value="0">
+        <div class="alignment-actions"><button id="hdmi-alignment-reset-button" type="button">Reset to 0%</button><button id="hdmi-alignment-preview-button" type="button">Preview Channel</button><button id="hdmi-alignment-pattern-button" type="button" hidden>Return to Test Pattern</button><button id="hdmi-alignment-cancel-button" type="button">Stop &amp; Close</button><button id="hdmi-alignment-save-button" type="button">Save Alignment</button></div>
+        <p id="hdmi-alignment-message" class="message" aria-live="polite"></p>
+      </section>
+
+      <section id="alignment-panel" class="panel alignment-panel" hidden aria-labelledby="alignment-heading">
+        <div class="alignment-heading"><div><span class="eyebrow">Composite Display</span><h2 id="alignment-heading">CRT Alignment Tool</h2></div><div class="alignment-heading-actions"><span id="alignment-status" class="alignment-status">Test pattern inactive</span><button id="alignment-close-button" type="button" class="alignment-close-button" aria-label="Close CRT Alignment Tool">Close</button></div></div>
+        <p>Use the controls while watching the CRT. Each adjustment restarts the VLC test pattern through <code>drm_vout</code>.{% if is_zero_w %} On the original Pi Zero W, saving stores the values for the next reboot instead of enabling runtime filtering during normal playback.{% endif %}</p>
+        <div class="alignment-guide" role="note"><strong>How to read the pattern:</strong> Adjust the picture until the yellow <strong>Safe Area</strong> box is fully visible and positioned where you want it. The circle is a geometry reference and should remain round after resizing.</div>
+        <div class="alignment-values" aria-live="polite">
+          <span>Left <strong id="align-left-value">0</strong> px</span><span>Right <strong id="align-right-value">0</strong> px</span><span>Top <strong id="align-top-value">0</strong> px</span><span>Bottom <strong id="align-bottom-value">0</strong> px</span>
+        </div>
+        <div class="alignment-controls">
+          <fieldset><legend>Position</legend><div class="direction-pad"><span></span><button type="button" data-align-action="up">Move Up</button><span></span><button type="button" data-align-action="left">Move Left</button><button type="button" data-align-action="center">Center</button><button type="button" data-align-action="right">Move Right</button><span></span><button type="button" data-align-action="down">Move Down</button><span></span></div></fieldset>
+          <fieldset><legend>Dimensions</legend><div class="size-controls"><button type="button" data-align-action="wider">Make Wider</button><button type="button" data-align-action="narrower">Make Narrower</button><button type="button" data-align-action="taller">Make Taller</button><button type="button" data-align-action="shorter">Make Shorter</button></div></fieldset>
+        </div>
+        <label class="alignment-step">Adjustment step <select id="alignment-step"><option value="1">1 pixel</option><option value="2">2 pixels</option><option value="5" selected>5 pixels</option><option value="10">10 pixels</option></select></label>
+        <div class="alignment-actions">{% if is_zero_w %}<button id="alignment-reset-original-button" type="button">Reset All to Original</button>{% endif %}<button id="alignment-reset-button" type="button">Reset Pattern</button><button id="alignment-cancel-button" type="button">Stop &amp; Close</button><button id="alignment-save-button" type="button">Save as Custom</button></div>
+        <p id="alignment-message" class="message"></p>
+      </section>
+
+      <section id="reboot-panel" class="panel reboot-panel" hidden aria-labelledby="reboot-heading" role="dialog" aria-modal="true">
+        <h2 id="reboot-heading">Reboot Required</h2>
+        <p id="reboot-message">CRT alignment changes are saved but are not active in normal composite playback. Reboot the original Pi Zero W to apply the KMS margins.</p>
+        <div class="alignment-actions"><button id="reboot-later-button" type="button">Later</button><button id="reboot-now-button" type="button">Reboot Now</button></div>
+        <p id="reboot-status" class="message" aria-live="polite"></p>
+      </section>
+
+      {% if is_zero_w %}<section id="streaming-notice-panel" class="panel stream-confirm-panel" hidden aria-labelledby="streaming-notice-heading" role="dialog" aria-modal="true">
+        <h2 id="streaming-notice-heading">Pi Zero W Streaming Notice</h2>
+        <p>The original Raspberry Pi Zero W has limited processing capacity. Incoming streams above SD resolution, high-bitrate streams, or formats that cannot use hardware decoding may stutter, buffer, lose synchronization, or fail to play smoothly—especially over composite output.</p>
+        <p>For the most reliable playback, use a 720×480 or lower source stream. RetroStation Player will start channels immediately and will not inspect each stream before playback.</p>
+        <div class="alignment-actions"><button id="streaming-notice-acknowledge-button" type="button">I Understand</button></div>
+        <p id="streaming-notice-status" class="message" aria-live="polite"></p>
+      </section>
+
+      {% endif %}      <section id="about-panel" class="panel about-panel" hidden aria-labelledby="about-heading">
         <h2 id="about-heading">About</h2>
         <p class="about-version">RetroStation Player <span class="version">v{{ version }}</span></p>
         <section class="system-information" aria-labelledby="system-information-heading">
@@ -169,6 +219,6 @@
       </section>
     </footer>
   </main>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v={{ asset_version }}"></script>
 </body>
 </html>

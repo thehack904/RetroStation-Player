@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from retrostation_player.channels import Channel
@@ -22,27 +23,68 @@ def test_volume_mapping_endpoints():
     assert round(MediaPlayer._volume_to_db(100), 2) == 4.00
 
 
-def test_apply_audio_sets_db_and_unmutes():
+def mixer_result(control="PCM", capabilities="pvolume pswitch"):
+    return SimpleNamespace(
+        returncode=0,
+        stdout=(
+            f"Simple mixer control '{control}',0\n"
+            f"  Capabilities: {capabilities}\n"
+            "  Playback channels: Front Left - Front Right\n"
+        ),
+        stderr="",
+    )
+
+
+def ok_result():
+    return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+
+def test_apply_audio_sets_db_and_unmutes_for_pcm():
     player = make_player(volume=50, muted=False)
-    with patch("subprocess.run") as run:
-        run.return_value.returncode = 0
-        run.return_value.stderr = ""
-        run.return_value.stdout = ""
+    with patch("subprocess.run", side_effect=[mixer_result("PCM"), ok_result()]) as run:
         player.apply_audio()
-    command = run.call_args.args[0]
+    command = run.call_args_list[1].args[0]
     assert command[:7] == ["amixer", "-q", "-c", "0", "sset", "PCM", "--"]
     assert command[-1] == "unmute"
     assert command[-2].endswith("dB")
 
 
-def test_apply_audio_mutes_at_zero():
-    player = make_player(volume=0, muted=False)
-    with patch("subprocess.run") as run:
-        run.return_value.returncode = 0
-        run.return_value.stderr = ""
-        run.return_value.stdout = ""
+def test_apply_audio_falls_back_to_speaker_and_uses_percent():
+    player = make_player(volume=50, muted=False)
+    with patch("subprocess.run", side_effect=[mixer_result("Speaker"), ok_result()]) as run:
         player.apply_audio()
-    assert run.call_args.args[0] == ["amixer", "-q", "-c", "0", "sset", "PCM", "mute"]
+    assert run.call_args_list[1].args[0] == [
+        "amixer", "-q", "-c", "0", "sset", "Speaker", "50%", "unmute"
+    ]
+
+
+def test_apply_audio_mutes_at_zero_using_detected_control():
+    player = make_player(volume=0, muted=False)
+    with patch("subprocess.run", side_effect=[mixer_result("Speaker"), ok_result()]) as run:
+        player.apply_audio()
+    assert run.call_args_list[1].args[0] == [
+        "amixer", "-q", "-c", "0", "sset", "Speaker", "mute"
+    ]
+
+
+def test_audio_control_detection_ignores_mic_playback_control_when_speaker_exists():
+    player = make_player(volume=25, muted=False)
+    contents = SimpleNamespace(
+        returncode=0,
+        stdout=(
+            "Simple mixer control 'Speaker',0\n"
+            "  Capabilities: pvolume pswitch pswitch-joined\n"
+            "  Playback channels: Front Left - Front Right\n"
+            "Simple mixer control 'Mic',0\n"
+            "  Capabilities: pvolume cvolume pswitch cswitch\n"
+            "  Playback channels: Mono\n"
+            "  Capture channels: Mono\n"
+        ),
+        stderr="",
+    )
+    with patch("subprocess.run", side_effect=[contents, ok_result()]) as run:
+        player.apply_audio()
+    assert run.call_args_list[1].args[0][5] == "Speaker"
 
 
 def test_external_audio_does_not_call_amixer():
@@ -133,3 +175,56 @@ def test_zero_w_mpv_profile_and_stretch(tmp_path, monkeypatch):
     assert '--drm-drmprime-video-plane=primary' in command
     assert '--drm-mode=720x480@59.94' in command
     assert '--keepaspect=no' in command
+
+
+def test_vlc_custom_alignment_uses_independent_edge_padding():
+    player = MediaPlayer(
+        backend="vlc",
+        player_path="cvlc",
+        fullscreen=True,
+        extra_args=[],
+        display_mode="composite",
+        display_resolution="480i",
+        crt_overscan="custom",
+        crt_custom_alignment={"left": 10, "right": 20, "top": 5, "bottom": 15},
+    )
+    args = player._vlc_display_args()
+    assert "--vout=drm_vout" in args
+    assert "--croppadd-paddleft=10" in args
+    assert "--croppadd-paddright=20" in args
+    assert "--croppadd-paddtop=5" in args
+    assert "--croppadd-paddbottom=15" in args
+
+
+def test_zero_w_composite_playback_ignores_runtime_overscan_filter():
+    player = MediaPlayer(
+        backend="vlc",
+        player_path="cvlc",
+        fullscreen=True,
+        extra_args=[],
+        display_mode="composite",
+        display_resolution="480i",
+        crt_overscan="standard",
+        hardware_profile="rpi-zero-w",
+    )
+    channel = Channel(id="1", number="1", name="Test", url="http://example.test/live", logo="", group="")
+    command = player._build_command(channel)
+    assert "--video-filter=croppadd" not in command
+
+
+def test_zero_w_composite_alignment_pattern_still_uses_runtime_filter():
+    player = MediaPlayer(
+        backend="vlc",
+        player_path="cvlc",
+        fullscreen=True,
+        extra_args=[],
+        display_mode="composite",
+        display_resolution="480i",
+        crt_overscan="none",
+        hardware_profile="rpi-zero-w",
+    )
+    args = player._vlc_display_args({"left": 10, "right": 12, "top": 6, "bottom": 8})
+    assert "--video-filter=croppadd" in args
+    assert "--croppadd-paddleft=10" in args
+
+
