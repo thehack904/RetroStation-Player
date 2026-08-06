@@ -212,6 +212,7 @@ async function loadConfig() {
     displayOptions = options;
     document.getElementById("m3u-url-input").value = config.m3u_url || "";
     document.getElementById("autoplay-input").checked = config.autoplay === true;
+    document.getElementById("boot-logo-enabled-input").checked = config.boot_logo_enabled !== false;
 
     const displaySettings = document.getElementById("display-settings");
     const resolutionSetting = document.getElementById("display-resolution-setting");
@@ -253,6 +254,7 @@ async function loadConfig() {
 async function saveConfig() {
   const m3uUrl = document.getElementById("m3u-url-input").value.trim();
   const autoplay = document.getElementById("autoplay-input").checked;
+  const bootLogoEnabled = document.getElementById("boot-logo-enabled-input").checked;
   const displayResolution = document.getElementById("display-resolution-input").value;
   const crtOverscan = document.getElementById("crt-overscan-input").value;
   const zeroWVideoSizing = document.getElementById("zero-w-video-sizing-input").value;
@@ -265,7 +267,7 @@ async function saveConfig() {
 
   setupMessage.textContent = "Saving…";
   try {
-    const payload = { m3u_url: m3uUrl, autoplay };
+    const payload = { m3u_url: m3uUrl, autoplay, boot_logo_enabled: bootLogoEnabled };
     if (displayOptions.resolution_control_available) {
       payload.display_resolution = displayResolution;
     }

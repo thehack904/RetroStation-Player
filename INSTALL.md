@@ -126,6 +126,8 @@ Each adjustment restarts the test pattern so VLC applies the new `croppadd` valu
 
 On the original Pi Zero W, saving CRT alignment displays **Reboot Now** and **Later** options. Choosing Later leaves a reminder in Settings. A reboot is also required after composite output is first enabled or after purge restores the original Raspberry Pi boot configuration.
 
+When **Show Boot Logo during startup** is enabled in the Web UI, RetroStation Player keeps the installer-managed `retrostation-player-startup-screen.service` enabled. The helper first displays `/opt/retrostation-player/static/boot-logo-starting.png` while the application initializes, then switches to `/opt/retrostation-player/static/boot-logo-ready.png` once the Web service is healthy. The ready logo remains visible until video playback has taken control and returns after the user presses Stop. On supported Raspberry Pi installations, the installer also adds quiet-boot kernel and systemd options so routine service messages and the console cursor are suppressed. Purging RetroStation Player removes those managed quiet-boot options.
+
 ---
 
 ## Audio behavior

@@ -26,5 +26,6 @@
   "audio_card": 0,
   "audio_control": "auto",
   "zero_w_video_sizing": "auto",
+  "boot_logo_enabled": true,
   "streaming_notice_acknowledged": false
 }

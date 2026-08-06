@@ -23,6 +23,10 @@ APPLY_PI_3B_PLUS_OPTIMIZATIONS=false
 ZERO_W_TUNING_UNIT="/etc/systemd/system/retrostation-player-zero-w-tuning.service"
 PI_3B_TUNING_UNIT="/etc/systemd/system/retrostation-player-pi-3b-tuning.service"
 PI_3B_PLUS_TUNING_UNIT="/etc/systemd/system/retrostation-player-pi-3b-plus-tuning.service"
+STARTUP_SCREEN_HELPER="/usr/local/libexec/retrostation-player-startup-screen"
+STARTUP_SCREEN_UNIT="/etc/systemd/system/retrostation-player-startup-screen.service"
+STARTUP_SCREEN_CONTROL_HELPER="/usr/local/libexec/retrostation-player-startup-screen-control"
+STARTUP_SCREEN_SUDOERS="/etc/sudoers.d/retrostation-player-startup-screen"
 COMPOSITE_OVERSCAN_HELPER="/usr/local/libexec/retrostation-player-composite-overscan"
 COMPOSITE_OVERSCAN_SUDOERS="/etc/sudoers.d/retrostation-player-composite-overscan"
 
@@ -41,8 +45,8 @@ Display modes:
   drm        Use direct DRM/KMS output without requiring a specific connector.
 
 Options:
-  -y, --yes  Acknowledge the streaming notice and accept detected-hardware
-             optimization and composite configuration prompts.
+  -y, --yes  Accept detected-hardware optimization and composite
+             configuration prompts, including the Pi Zero W streaming notice.
   --purge     With uninstall, also remove configuration, state, service user,
               and installer-created Raspberry Pi boot configuration backups.
   -h, --help Show this help.
@@ -210,7 +214,7 @@ Pi Zero W-only optimizations:
     keyboard shortcuts that are not needed by a Web UI-controlled player.
 
   - Disable unused console gettys on tty1 and tty3 through tty6
-    Removes unused local login prompts while preserving tty2 for video playback.
+    Removes unused local login prompts with tty2 reserved exclusively for video playback.
 
   - Disable Wi-Fi power saving while RetroStation Player is running
     Keeps the wireless adapter fully awake to reduce stream buffering, latency,
@@ -273,7 +277,7 @@ Pi 3B-only optimizations:
     keyboard shortcuts that are not needed by a Web UI-controlled player.
 
   - Disable unused console gettys on tty1 and tty3 through tty6
-    Removes unused local login prompts while preserving tty2 for video playback.
+    Removes unused local login prompts with tty2 reserved exclusively for video playback.
 
   - Disable Wi-Fi power saving while RetroStation Player is running
     Keeps the wireless adapter fully awake to reduce stream buffering, latency,
@@ -335,7 +339,7 @@ Pi 3B+-only optimizations:
     keyboard shortcuts that are not needed by a Web UI-controlled player.
 
   - Disable unused console gettys on tty1 and tty3 through tty6
-    Removes unused local login prompts while preserving tty2 for video playback.
+    Removes unused local login prompts with tty2 reserved exclusively for video playback.
 
   - Disable Wi-Fi power saving while RetroStation Player is running
     Keeps the wireless adapter fully awake to reduce stream buffering, latency,
@@ -428,6 +432,61 @@ configure_zero_w_boot_overlay() {
   REBOOT_REQUIRED=true
 }
 
+
+configure_quiet_boot() {
+  local cmdline_file=""
+  local token
+  local -a quiet_tokens=(quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false vt.global_cursor_default=0 logo.nologo consoleblank=0)
+
+  if [[ -f /boot/firmware/cmdline.txt ]]; then
+    cmdline_file=/boot/firmware/cmdline.txt
+  elif [[ -f /boot/cmdline.txt ]]; then
+    cmdline_file=/boot/cmdline.txt
+  else
+    echo "Boot command line was not found; skipped quiet-boot configuration."
+    return 0
+  fi
+
+  local timestamp backup current
+  timestamp="$(date +%Y%m%d-%H%M%S)"
+  backup="${cmdline_file}.retrostation-player.${timestamp}.bak"
+  current="$(tr '\n' ' ' < "$cmdline_file" | xargs)"
+
+  for token in "${quiet_tokens[@]}"; do
+    if [[ " $current " != *" $token "* ]]; then
+      current+=" $token"
+    fi
+  done
+
+  current="$(printf '%s' "$current" | xargs)"
+  if [[ "$(tr '\n' ' ' < "$cmdline_file" | xargs)" != "$current" ]]; then
+    cp -a -- "$cmdline_file" "$backup"
+    printf '%s\n' "$current" > "$cmdline_file"
+    echo "Enabled quiet boot in: $cmdline_file"
+    echo "Backup created at: $backup"
+    REBOOT_REQUIRED=true
+  else
+    echo "Quiet boot is already configured."
+  fi
+}
+
+remove_quiet_boot_settings() {
+  local cmdline_file="" token current
+  local -a quiet_tokens=(quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false vt.global_cursor_default=0 logo.nologo consoleblank=0)
+  if [[ -f /boot/firmware/cmdline.txt ]]; then
+    cmdline_file=/boot/firmware/cmdline.txt
+  elif [[ -f /boot/cmdline.txt ]]; then
+    cmdline_file=/boot/cmdline.txt
+  else
+    return 0
+  fi
+  current="$(tr '\n' ' ' < "$cmdline_file" | xargs)"
+  for token in "${quiet_tokens[@]}"; do
+    current="$(printf ' %s ' "$current" | sed "s/[[:space:]]${token//./\.}[[:space:]]/ /g" | xargs)"
+  done
+  printf '%s\n' "$current" > "$cmdline_file"
+}
+
 unit_exists() {
   local unit="$1"
   systemctl list-unit-files "$unit" --no-legend 2>/dev/null | grep -q "^${unit}[[:space:]]"
@@ -443,6 +502,69 @@ disable_unit_if_present() {
   fi
 }
 
+install_startup_screen() {
+  configure_quiet_boot
+
+  local source_script="$INSTALL_DIR/scripts/retrostation-player-startup-screen"
+  install -m 755 "$source_script" "$STARTUP_SCREEN_HELPER"
+
+  cat > "$STARTUP_SCREEN_UNIT" <<EOF_STARTUP_UNIT
+# Managed-By: RetroStation-Player
+[Unit]
+Description=RetroStation Player boot-time startup screen
+After=local-fs.target systemd-user-sessions.service
+Before=retrostation-player.service
+Conflicts=getty@tty1.service getty@tty2.service serial-getty@tty2.service
+
+[Service]
+Type=simple
+User=root
+StandardInput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+ExecStartPre=-/usr/bin/systemctl stop getty@tty2.service
+ExecStartPre=-/usr/bin/systemctl stop serial-getty@tty2.service
+ExecStartPre=/usr/bin/chvt 1
+Environment=RETROSTATION_PLAYER_PORT=$PORT
+Environment=RETROSTATION_PLAYER_PLAYBACK_TTY=2
+Environment=RETROSTATION_PLAYER_PLAYBACK_READY_DELAY=3
+Environment=RETROSTATION_PLAYER_STARTING_LOGO_PATH=/opt/retrostation-player/static/boot-logo-starting.png
+Environment=RETROSTATION_PLAYER_READY_LOGO_PATH=/opt/retrostation-player/static/boot-logo-ready.png
+ExecStart=$STARTUP_SCREEN_HELPER
+TimeoutStartSec=0
+TimeoutStopSec=5
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
+EOF_STARTUP_UNIT
+
+  # tty2 is dedicated to DRM/VLC playback. Mask it even on upgrades so an
+  # existing agetty cannot flash a login prompt during the logo-to-video handoff.
+  systemctl disable --now getty@tty2.service 2>/dev/null || true
+  systemctl mask getty@tty2.service 2>/dev/null || true
+  systemctl disable --now serial-getty@tty2.service 2>/dev/null || true
+  systemctl mask serial-getty@tty2.service 2>/dev/null || true
+
+  systemctl daemon-reload
+  systemctl enable retrostation-player-startup-screen.service
+  echo "Installed boot-time startup screen service."
+}
+
+install_startup_screen_control_helper() {
+  local source_helper="$INSTALL_DIR/scripts/retrostation-player-startup-screen-control-helper"
+  [[ -f "$source_helper" ]] || fatal "Startup screen control helper is missing: $source_helper"
+  install -d -m 755 -o root -g root "$(dirname "$STARTUP_SCREEN_CONTROL_HELPER")"
+  install -m 755 -o root -g root "$source_helper" "$STARTUP_SCREEN_CONTROL_HELPER"
+  cat > "$STARTUP_SCREEN_SUDOERS" <<EOF_SUDOERS
+$SERVICE_USER ALL=(root) NOPASSWD: $STARTUP_SCREEN_CONTROL_HELPER *
+EOF_SUDOERS
+  chmod 440 "$STARTUP_SCREEN_SUDOERS"
+  chown root:root "$STARTUP_SCREEN_SUDOERS"
+  visudo -cf "$STARTUP_SCREEN_SUDOERS" >/dev/null || fatal "Generated sudoers rule is invalid: $STARTUP_SCREEN_SUDOERS"
+}
+
 apply_zero_w_optimizations() {
   [[ "$IS_PI_ZERO_W" == true && "$APPLY_ZERO_W_OPTIMIZATIONS" == true ]] || return 0
 
@@ -454,11 +576,13 @@ apply_zero_w_optimizations() {
   disable_unit_if_present triggerhappy.service
 
   local tty
-  for tty in 1 3 4 5 6; do
+  for tty in 1 2 3 4 5 6; do
     systemctl disable --now "getty@tty${tty}.service" 2>/dev/null || true
     systemctl mask "getty@tty${tty}.service" 2>/dev/null || true
     echo "Disabled unused console: getty@tty${tty}.service"
   done
+
+  install_startup_screen
 
   cat > "$ZERO_W_TUNING_UNIT" <<'EOF_ZERO_W_UNIT'
 # Managed-By: RetroStation-Player
@@ -496,11 +620,13 @@ apply_pi_3b_optimizations() {
   disable_unit_if_present triggerhappy.service
 
   local tty
-  for tty in 1 3 4 5 6; do
+  for tty in 1 2 3 4 5 6; do
     systemctl disable --now "getty@tty${tty}.service" 2>/dev/null || true
     systemctl mask "getty@tty${tty}.service" 2>/dev/null || true
     echo "Disabled unused console: getty@tty${tty}.service"
   done
+
+  install_startup_screen
 
   cat > "$PI_3B_TUNING_UNIT" <<'EOF_PI_3B_UNIT'
 # Managed-By: RetroStation-Player
@@ -537,11 +663,13 @@ apply_pi_3b_plus_optimizations() {
   disable_unit_if_present triggerhappy.service
 
   local tty
-  for tty in 1 3 4 5 6; do
+  for tty in 1 2 3 4 5 6; do
     systemctl disable --now "getty@tty${tty}.service" 2>/dev/null || true
     systemctl mask "getty@tty${tty}.service" 2>/dev/null || true
     echo "Disabled unused console: getty@tty${tty}.service"
   done
+
+  install_startup_screen
 
   cat > "$PI_3B_PLUS_TUNING_UNIT" <<'EOF_PI_3B_PLUS_UNIT'
 # Managed-By: RetroStation-Player
@@ -763,7 +891,7 @@ ensure_system_packages() {
   if [[ ( "$IS_PI_ZERO_W" == true && "$APPLY_ZERO_W_OPTIMIZATIONS" == true ) ||
         ( "$IS_PI_3B" == true && "$APPLY_PI_3B_OPTIMIZATIONS" == true ) ||
         ( "$IS_PI_3B_PLUS" == true && "$APPLY_PI_3B_PLUS_OPTIMIZATIONS" == true ) ]]; then
-    packages+=(iw)
+    packages+=(iw fbi)
   fi
   if [[ "$DISPLAY_MODE" == "composite" ]]; then
     packages+=(vlc)
@@ -985,15 +1113,10 @@ EOF_SERVICE
       echo 'Environment=DISPLAY=:0'
     elif [[ "$DISPLAY_MODE" == "composite" ]]; then
       cat <<'EOF_SERVICE'
-Environment=RETROSTATION_PLAYER_TTY=/dev/tty2
-TTYPath=/dev/tty2
-StandardInput=tty
+# The startup-screen service owns tty1 until playback is initialized. Do not
+# switch to tty2 here; doing so blanks composite output before VLC is ready.
 StandardOutput=journal
 StandardError=journal
-TTYReset=yes
-TTYVHangup=yes
-TTYVTDisallocate=yes
-ExecStartPre=+/usr/bin/chvt 2
 EOF_SERVICE
     fi
 
@@ -1013,9 +1136,8 @@ cmd_install() {
   [[ $EUID -eq 0 ]] || fatal "Run this installer as root (sudo)."
   command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]] || fatal "systemd is required."
 
-  prompt_streaming_notice
-
   if is_original_pi_zero_w; then
+    prompt_streaming_notice
     prompt_zero_w_optimizations
   elif is_pi_3b; then
     prompt_pi_3b_optimizations
@@ -1080,15 +1202,16 @@ cmd_install() {
   chmod 660 "$CONFIG_DIR/config.json"
 
   install_composite_overscan_helper
+  install_startup_screen_control_helper
   write_service_file
   apply_zero_w_optimizations
   apply_pi_3b_optimizations
   apply_pi_3b_plus_optimizations
 
   systemctl daemon-reload
-  systemctl enable "$SERVICE_NAME"
+  systemctl enable "${SERVICE_NAME}.service"
   if [[ "$REBOOT_REQUIRED" == false ]]; then
-    systemctl start "$SERVICE_NAME" || true
+    systemctl start "${SERVICE_NAME}.service" || true
   fi
 
   local PLAYER_IP PLAYER_HOSTNAME PLAYER_FQDN
@@ -1191,7 +1314,13 @@ cmd_uninstall() {
     systemctl disable --now "$SERVICE_NAME" 2>/dev/null || true
   fi
 
-  rm -f "$COMPOSITE_OVERSCAN_HELPER" "$COMPOSITE_OVERSCAN_SUDOERS"
+  rm -f "$COMPOSITE_OVERSCAN_HELPER" "$COMPOSITE_OVERSCAN_SUDOERS" "$STARTUP_SCREEN_HELPER" "$STARTUP_SCREEN_CONTROL_HELPER" "$STARTUP_SCREEN_SUDOERS"
+
+  if [[ -f "$STARTUP_SCREEN_UNIT" ]] && grep -Fqx "$OWNERSHIP_MARKER" "$STARTUP_SCREEN_UNIT"; then
+    systemctl disable --now retrostation-player-startup-screen.service 2>/dev/null || true
+    rm -f "$STARTUP_SCREEN_UNIT"
+    systemctl daemon-reload
+  fi
 
   assert_safe_install_dir "$INSTALL_DIR"
   if [[ -d "$INSTALL_DIR" ]]; then
@@ -1202,6 +1331,7 @@ cmd_uninstall() {
     assert_safe_purge_dir "$CONFIG_DIR" "/etc/retrostation-player"
     assert_safe_purge_dir "$STATE_DIR" "/var/lib/retrostation-player"
 
+    remove_quiet_boot_settings
     restore_pi_boot_config_for_purge
     if [[ -f "$ZERO_W_TUNING_UNIT" ]] && grep -Fqx "$OWNERSHIP_MARKER" "$ZERO_W_TUNING_UNIT"; then
       systemctl disable --now retrostation-player-zero-w-tuning.service 2>/dev/null || true
@@ -1218,7 +1348,12 @@ cmd_uninstall() {
       rm -f "$PI_3B_PLUS_TUNING_UNIT"
       systemctl daemon-reload
     fi
-    for tty in 1 3 4 5 6; do
+    if [[ -f "$STARTUP_SCREEN_UNIT" ]] && grep -Fqx "$OWNERSHIP_MARKER" "$STARTUP_SCREEN_UNIT"; then
+      systemctl disable --now retrostation-player-startup-screen.service 2>/dev/null || true
+      rm -f "$STARTUP_SCREEN_UNIT"
+      systemctl daemon-reload
+    fi
+    for tty in 1 2 3 4 5 6; do
       systemctl unmask "getty@tty${tty}.service" 2>/dev/null || true
     done
     rm -rf -- "$CONFIG_DIR" "$STATE_DIR"

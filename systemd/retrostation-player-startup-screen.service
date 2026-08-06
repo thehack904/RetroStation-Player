@@ -1,0 +1,30 @@
+# Managed-By: RetroStation-Player
+[Unit]
+Description=RetroStation Player boot-time startup screen
+Documentation=https://github.com/thehack904/RetroStation-Player-Private
+After=local-fs.target systemd-user-sessions.service
+Before=retrostation-player.service
+Conflicts=getty@tty1.service getty@tty2.service serial-getty@tty2.service
+
+[Service]
+Type=simple
+User=root
+StandardInput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+ExecStartPre=-/usr/bin/systemctl stop getty@tty2.service
+ExecStartPre=-/usr/bin/systemctl stop serial-getty@tty2.service
+ExecStartPre=/usr/bin/chvt 1
+Environment=RETROSTATION_PLAYER_PORT=5050
+Environment=RETROSTATION_PLAYER_PLAYBACK_TTY=2
+Environment=RETROSTATION_PLAYER_PLAYBACK_READY_DELAY=3
+Environment=RETROSTATION_PLAYER_STARTING_LOGO_PATH=/opt/retrostation-player/static/boot-logo-starting.png
+Environment=RETROSTATION_PLAYER_READY_LOGO_PATH=/opt/retrostation-player/static/boot-logo-ready.png
+ExecStart=/usr/local/libexec/retrostation-player-startup-screen
+TimeoutStartSec=0
+TimeoutStopSec=5
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

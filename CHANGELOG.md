@@ -1,8 +1,25 @@
 # Changelog
+### Boot splash refinements
+
+- Added separate `boot-logo-starting.png` and `boot-logo-ready.png` assets.
+- The startup helper now switches from the starting graphic to the ready/idle graphic after the Web service health check succeeds.
+- The ready/idle graphic remains visible until playback has initialized and is shown again after Stop.
+- Added managed quiet-boot options to suppress routine kernel/systemd service output and the console cursor on supported Raspberry Pi installations.
+- Purge removes the quiet-boot options managed by RetroStation Player.
+
 
 All notable changes to RetroStation Player are documented here.
 
+## Unreleased
+- Prevent tty2 login prompts from flashing during the HDMI startup-logo-to-video handoff by stopping and masking its getty services.
+
+- Keep the boot logo visible on composite until VLC playback has initialized.
+- Prevent tty2 login text from flashing during the splash-to-video handoff.
+- Replace the boot logo with the clean variant that omits the startup status line.
+
 ## [0.2.0] - 2026-08-01
+
+- The optional boot logo remains visible until playback actually begins and returns when playback is stopped from the Web UI.
 
 ### Added
 
@@ -122,3 +139,7 @@ All notable changes to RetroStation Player are documented here.
 - Added the Pi 4 and Pi 5 support distinction: both remain supported playback targets but receive no Zero W/Pi 3 optimization prompt.
 - Documented Web UI runtime/journal log behavior, log API endpoints, Zero W safeguards, standard uninstall, and purge semantics.
 - Consolidated temporary patch notes into maintained project documentation.
+
+### Fixed
+- Corrected the two-stage startup-screen state selection so `boot-logo-ready.png` is shown immediately when RetroStation Player is already healthy, including after playback is stopped.
+- Forced an explicit framebuffer repaint with the ready/idle asset when the Web service becomes healthy, preventing the starting asset from remaining visible.

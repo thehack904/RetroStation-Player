@@ -100,3 +100,6 @@ The HDMI Alignment Tool displays a test pattern once and updates mpv live throug
 On the original Pi Zero W, use **Reset All CRT Settings** to remove both current KMS margins and any older RetroStation-managed firmware overscan block. Reboot to restore the original boot text and composite picture size.
 
 On the original Pi Zero W, use a 720×480 or lower source stream for the most reliable playback. Higher-resolution, high-bitrate, or unsupported streams may stutter or lose synchronization, especially over composite output. The installer and first Web UI visit require acknowledgment of this limitation; channels then start immediately without an `ffprobe` delay.
+
+- Two-stage appliance boot display: branded starting logo, then ready/idle logo until playback begins
+- Quiet Raspberry Pi boot mode that suppresses routine service output when the startup-screen feature is installed

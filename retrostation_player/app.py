@@ -9,7 +9,7 @@ from typing import Any
 from flask import Flask, Response, jsonify, render_template, request
 
 from .channels import Channel, fetch_channels, find_channel
-from .config import config_dir, ensure_directories, kernel_cmdline_path, load_config, request_system_reboot, reset_zero_w_composite_overscan, save_config, save_zero_w_composite_overscan
+from .config import config_dir, ensure_directories, kernel_cmdline_path, load_config, request_system_reboot, reset_zero_w_composite_overscan, save_config, save_zero_w_composite_overscan, set_startup_screen_enabled, show_startup_screen
 from .display import (
     default_resolution,
     detect_hdmi_audio_device,
@@ -47,6 +47,7 @@ _EDITABLE_KEYS: frozenset[str] = frozenset(
         "volume",
         "muted",
         "zero_w_video_sizing",
+        "boot_logo_enabled",
     }
 )
 
@@ -302,6 +303,13 @@ def create_app() -> Flask:
     def stop_player():
         player.stop(clear_channel=False)
         logger.info("Playback stopped from the Web UI")
+        if bool(config.get("boot_logo_enabled", True)):
+            try:
+                show_startup_screen()
+            except OSError as exc:
+                # Stopping playback remains successful even if the optional
+                # framebuffer logo cannot be restored.
+                logger.warning("Unable to restore startup logo after stop: %s", exc)
         return jsonify(player.status())
 
     @app.post("/api/player/restart")
@@ -619,6 +627,9 @@ def create_app() -> Flask:
         if "muted" in updates:
             updates["muted"] = bool(updates["muted"])
 
+        if "boot_logo_enabled" in updates:
+            updates["boot_logo_enabled"] = bool(updates["boot_logo_enabled"])
+
         if "zero_w_video_sizing" in updates:
             if hardware_profile != "rpi-zero-w" or display_mode != "hdmi":
                 return jsonify({"error": "Zero W video sizing is available only on a Raspberry Pi Zero W using HDMI"}), 400
@@ -674,6 +685,7 @@ def create_app() -> Flask:
         m3u_url_changed = "m3u_url" in updates
         display_changed = bool({"display_resolution", "crt_overscan", "crt_custom_alignment", "zero_w_video_sizing", "hdmi_underscan_percent"} & updates.keys())
         audio_changed = bool({"volume", "muted"} & updates.keys())
+        boot_logo_changed = "boot_logo_enabled" in updates
         config.update(updates)
         logger.info("Configuration updated: %s", ", ".join(sorted(updates)))
 
@@ -702,6 +714,13 @@ def create_app() -> Flask:
                 )
             except PlayerError as exc:
                 return jsonify({"error": str(exc)}), 500
+
+        if boot_logo_changed:
+            try:
+                set_startup_screen_enabled(bool(config.get("boot_logo_enabled", True)))
+            except OSError as exc:
+                logger.warning("Failed to update startup screen state from Web UI: %s", exc)
+                return jsonify({"error": "Settings were saved, but the boot logo service could not be updated. Check system permissions."}), 500
 
         if display_changed:
             try:
