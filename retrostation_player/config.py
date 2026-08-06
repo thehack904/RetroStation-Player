@@ -34,6 +34,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "audio_card": 0,
     "audio_control": "auto",
     "streaming_notice_acknowledged": False,
+    "boot_logo_enabled": True,
 }
 
 
@@ -86,6 +87,7 @@ def state_file() -> Path:
 
 
 COMPOSITE_OVERSCAN_HELPER = Path("/usr/local/libexec/retrostation-player-composite-overscan")
+STARTUP_SCREEN_HELPER = Path("/usr/local/libexec/retrostation-player-startup-screen-control")
 
 
 def kernel_cmdline_path() -> Path:
@@ -129,3 +131,49 @@ def request_system_reboot() -> None:
 def reset_zero_w_composite_overscan() -> str:
     """Remove current KMS margins and the older managed firmware overscan block."""
     return _run_privileged_display_helper(["reset-original"])
+
+
+
+
+def show_startup_screen() -> None:
+    """Return the local display to the enabled RetroStation Player logo."""
+    import subprocess
+
+    command = ["sudo", "-n", str(STARTUP_SCREEN_HELPER), "show"]
+    try:
+        completed = subprocess.run(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        raise OSError("Unable to display the startup screen") from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise OSError(detail or "Startup screen helper failed")
+
+def set_startup_screen_enabled(enabled: bool) -> None:
+    import subprocess
+
+    command = ["sudo", "-n", str(STARTUP_SCREEN_HELPER), "enable" if enabled else "disable"]
+    try:
+        completed = subprocess.run(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise OSError("sudo is not installed") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise OSError("Timed out running the startup screen helper") from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise OSError(detail or "Startup screen helper failed")

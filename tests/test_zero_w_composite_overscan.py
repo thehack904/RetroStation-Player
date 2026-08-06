@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from retrostation_player.config import request_system_reboot, save_zero_w_composite_overscan
+from retrostation_player.config import request_system_reboot, save_zero_w_composite_overscan, set_startup_screen_enabled
 
 
 def test_save_zero_w_composite_overscan_calls_privileged_helper():
@@ -60,4 +60,26 @@ def test_reset_zero_w_composite_overscan_uses_privileged_helper():
     assert "cmdline.txt" in result
     assert run.call_args.args[0] == [
         "sudo", "-n", "/usr/local/libexec/retrostation-player-composite-overscan", "reset-original"
+    ]
+
+
+def test_set_startup_screen_enabled_uses_scoped_helper():
+    with patch("subprocess.run") as run:
+        run.return_value.returncode = 0
+        run.return_value.stdout = "enabled\n"
+        run.return_value.stderr = ""
+        set_startup_screen_enabled(True)
+    assert run.call_args.args[0] == [
+        "sudo", "-n", "/usr/local/libexec/retrostation-player-startup-screen-control", "enable"
+    ]
+
+
+def test_set_startup_screen_disabled_uses_scoped_helper():
+    with patch("subprocess.run") as run:
+        run.return_value.returncode = 0
+        run.return_value.stdout = "disabled\n"
+        run.return_value.stderr = ""
+        set_startup_screen_enabled(False)
+    assert run.call_args.args[0] == [
+        "sudo", "-n", "/usr/local/libexec/retrostation-player-startup-screen-control", "disable"
     ]

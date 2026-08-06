@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+set -euo pipefail
+PORT="${RETROSTATION_PLAYER_PORT:-5050}"
+HEALTH_URL="http://127.0.0.1:${PORT}/api/health"
+STATUS_URL="http://127.0.0.1:${PORT}/api/player/status"
+POLL_INTERVAL=1
+STARTUP_TIMEOUT=120
+PLAYBACK_READY_DELAY="${RETROSTATION_PLAYER_PLAYBACK_READY_DELAY:-3}"
+TTY_DEVICE="${RETROSTATION_PLAYER_TTY:-/dev/tty1}"
+PLAYBACK_TTY="${RETROSTATION_PLAYER_PLAYBACK_TTY:-2}"
+STARTING_LOGO_PATH="${RETROSTATION_PLAYER_STARTING_LOGO_PATH:-/opt/retrostation-player/static/boot-logo-starting.png}"
+READY_LOGO_PATH="${RETROSTATION_PLAYER_READY_LOGO_PATH:-/opt/retrostation-player/static/boot-logo-ready.png}"
+FBI_PID=""
+
+clear_screen(){ printf '\033[2J\033[H'; }
+hide_cursor(){ printf '\033[?25l'; }
+show_cursor(){ printf '\033[?25h'; }
+set_color_teal(){ printf '\033[36m'; }
+set_color_white(){ printf '\033[97m'; }
+reset_color(){ printf '\033[0m'; }
+move_to(){ printf '\033[%d;%dH' "$1" "$2"; }
+
+cleanup_image(){
+  if [[ -n "$FBI_PID" ]]; then
+    kill "$FBI_PID" 2>/dev/null || true
+    wait "$FBI_PID" 2>/dev/null || true
+    FBI_PID=""
+  fi
+  pkill -TERM -x fbi 2>/dev/null || true
+}
+cleanup(){ cleanup_image; show_cursor || true; }
+trap cleanup EXIT INT TERM
+
+show_logo_image(){
+  local image_path="$1"
+  cleanup_image
+  [[ -r "$image_path" ]] || return 1
+  command -v fbi >/dev/null 2>&1 || return 1
+  [[ -e /dev/fb0 ]] || return 1
+  fbi -T 1 -d /dev/fb0 -noverbose -a -1 "$image_path" </dev/tty1 >/dev/null 2>&1 &
+  FBI_PID=$!
+  sleep 0.5
+  kill -0 "$FBI_PID" 2>/dev/null || { FBI_PID=""; return 1; }
+}
+
+draw_text_logo(){
+  clear_screen
+  hide_cursor
+  move_to 5 25; set_color_white; printf 'RETROSTATION'
+  move_to 6 25; set_color_teal; printf '%s' '---  PLAYER  ---'; reset_color
+  move_to 9 25; set_color_teal; printf 'STARTING RETROSTATION PLAYER'; reset_color
+}
+
+draw_failed_screen(){
+  cleanup_image
+  clear_screen
+  show_cursor
+  move_to 8 18; set_color_white; printf 'RetroStation Player failed to start'; reset_color
+  move_to 10 18; printf 'Run:'
+  move_to 11 18; set_color_teal; printf 'sudo systemctl status retrostation-player'; reset_color
+  move_to 13 1
+}
+
+http_get(){
+  local url="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -sf --max-time 2 "$url"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- -T 2 "$url"
+  else
+    return 1
+  fi
+}
+
+player_is_ready(){ http_get "$HEALTH_URL" >/dev/null 2>&1; }
+player_is_playing(){
+  local response
+  response="$(http_get "$STATUS_URL" 2>/dev/null)" || return 1
+  printf '%s' "$response" | grep -Eq '"playing"[[:space:]]*:[[:space:]]*true'
+}
+
+command -v chvt >/dev/null 2>&1 && chvt 1 2>/dev/null || true
+exec >"$TTY_DEVICE" 2>&1
+hide_cursor
+using_image=false
+
+# Select the correct first frame before drawing anything. During a normal boot
+# the Web service is not healthy yet, so the starting image is shown. When this
+# unit is restarted after Stop, the Web service is already healthy and the
+# ready/idle image is shown immediately; the starting image must never flash or
+# remain on screen in the stopped state.
+if player_is_ready; then
+  if show_logo_image "$READY_LOGO_PATH"; then
+    using_image=true
+  else
+    clear_screen
+    hide_cursor
+    move_to 5 25; set_color_white; printf 'RETROSTATION'
+    move_to 6 25; set_color_teal; printf '%s' '---  PLAYER  ---'; reset_color
+  fi
+else
+  if show_logo_image "$STARTING_LOGO_PATH"; then
+    using_image=true
+  else
+    draw_text_logo
+  fi
+fi
+
+# Keep the logo visible while the Web service starts. Once the Web service is
+# available, continue displaying the ready logo until an actual player process
+# is running. This also makes the same service suitable for the stopped state.
+elapsed=0
+while ! player_is_ready; do
+  if (( elapsed >= STARTUP_TIMEOUT )); then
+    draw_failed_screen
+    exit 1
+  fi
+  sleep "$POLL_INTERVAL"
+  elapsed=$((elapsed + POLL_INTERVAL))
+done
+
+# The Web application is now healthy. Replace the startup graphic with the
+# clean ready/idle graphic, then keep it visible until playback has really
+# initialized. When this service is restarted after Stop, the health check is
+# already available, so the starting image naturally transitions to ready.
+# Explicitly repaint the ready asset after the health transition. Do not rely
+# on the framebuffer contents left by the starting-image process.
+if show_logo_image "$READY_LOGO_PATH"; then
+  using_image=true
+else
+  using_image=false
+  clear_screen
+  hide_cursor
+  move_to 5 25; set_color_white; printf 'RETROSTATION'
+  move_to 6 25; set_color_teal; printf '%s' '---  PLAYER  ---'; reset_color
+fi
+
+playing_since=0
+while true; do
+  if player_is_playing; then
+    if (( playing_since == 0 )); then
+      playing_since=$(date +%s)
+    fi
+    now=$(date +%s)
+    if (( now - playing_since >= PLAYBACK_READY_DELAY )); then
+      # tty2 is reserved exclusively for playback. Stop any getty that may
+      # still be active from an older installation before exposing the VT.
+      # Clearing the VT alone is insufficient because agetty can immediately
+      # repaint the login prompt during the DRM handoff.
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl stop "getty@tty${PLAYBACK_TTY}.service" 2>/dev/null || true
+        systemctl stop "serial-getty@tty${PLAYBACK_TTY}.service" 2>/dev/null || true
+      fi
+      if [[ -w "/dev/tty${PLAYBACK_TTY}" ]]; then
+        printf '\033[2J\033[H\033[30;40m\033[?25l' >"/dev/tty${PLAYBACK_TTY}" 2>/dev/null || true
+      fi
+      cleanup_image
+      command -v chvt >/dev/null 2>&1 && chvt "$PLAYBACK_TTY" 2>/dev/null || true
+      exit 0
+    fi
+  else
+    playing_since=0
+  fi
+  sleep "$POLL_INTERVAL"
+done

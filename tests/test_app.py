@@ -21,6 +21,7 @@ def test_index_renders_retrostation_branding(monkeypatch, tmp_path):
     assert "Browser-controlled IPTV display" in page
     assert "Service Logs" in page
     assert "logs-button" in page
+    assert "Show Boot Logo during startup" in page
 
 
 def test_index_renders_package_version(monkeypatch, tmp_path):
