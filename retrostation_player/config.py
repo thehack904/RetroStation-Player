@@ -35,6 +35,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "audio_control": "auto",
     "streaming_notice_acknowledged": False,
     "boot_logo_enabled": True,
+    "default_channel_id": "",
 }
 
 

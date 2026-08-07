@@ -23,6 +23,9 @@ All notable changes to RetroStation Player are documented here.
 
 ### Added
 
+- **Playback failure detection and automatic stream restart**: `MediaPlayer` now monitors the player process in a background watchdog thread. When the process exits unexpectedly (network drop, stream error, or player crash), the watchdog waits with exponential back-off (1 s, 2 s, 4 s … capped at 30 s) and automatically restarts the stream. Intentional stops and channel changes suppress the watchdog so user actions are never overridden. `status()` exposes `failure_count`, `restart_count`, `last_failure_reason`, and `last_failure_time` to surface health details to the Web UI.
+- **mpv JSON IPC controller** (`retrostation_player/mpv_ipc.py`): `MpvIpcController` class and `MpvIpcError` exception for sending JSON IPC commands to a running mpv process over a Unix domain socket. Exposes `send_command`, `get_property`, `set_property`, and `is_socket_ready`. Reused by the player for both HDMI alignment and main playback IPC.
+- mpv playback processes are now started with `--input-ipc-server` pointing at a stable Unix socket (`/tmp/retrostation-player.sock`), making them controllable at runtime. The `playback_ipc` attribute on `MediaPlayer` exposes the controller for future features such as software volume control and failure detection. User-supplied `--input-ipc-server` values in `extra_args` are filtered out so the managed socket path is always used.
 - Required installer acknowledgment explaining original Pi Zero W streaming limitations.
 - Persistent one-time Pi Zero W streaming-performance notice in the Web UI.
 - Automatic ALSA playback-mixer detection for `PCM`, `Speaker`, `Headphone`, and `Master`.
