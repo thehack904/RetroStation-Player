@@ -16,6 +16,7 @@ const muteButton = document.getElementById("mute-button");
 const audioControlNote = document.getElementById("audio-control-note");
 let channels = [];
 let setupAutoShown = false;
+let savedDefaultChannelId = "";
 let displayOptions = { resolutions: [], overscan_presets: [], backend: "mpv", display_mode: "desktop", hdmi_underscan_control_available: false };
 let hdmiUnderscanSaveTimer = null;
 
@@ -69,12 +70,33 @@ function renderChannels() {
     button.addEventListener("click", () => playChannel(channel.id));
     list.appendChild(button);
   }
+  populateDefaultChannelSelect(savedDefaultChannelId);
 }
 
 function escapeHtml(value) {
   const element = document.createElement("div");
   element.textContent = value ?? "";
   return element.innerHTML;
+}
+
+function populateDefaultChannelSelect(selectedId) {
+  const select = document.getElementById("default-channel-input");
+  if (!select) return;
+  const current = selectedId !== undefined ? selectedId : select.value;
+  select.replaceChildren();
+  const noneOption = document.createElement("option");
+  noneOption.value = "";
+  noneOption.textContent = "Last played channel";
+  select.appendChild(noneOption);
+  for (const channel of channels) {
+    const option = document.createElement("option");
+    option.value = channel.id;
+    option.textContent = `${channel.number} · ${channel.name}`;
+    select.appendChild(option);
+  }
+  if (current && [...select.options].some((o) => o.value === current)) {
+    select.value = current;
+  }
 }
 
 async function loadChannels(force = false) {
@@ -213,6 +235,8 @@ async function loadConfig() {
     document.getElementById("m3u-url-input").value = config.m3u_url || "";
     document.getElementById("autoplay-input").checked = config.autoplay === true;
     document.getElementById("boot-logo-enabled-input").checked = config.boot_logo_enabled !== false;
+    savedDefaultChannelId = config.default_channel_id || "";
+    populateDefaultChannelSelect(savedDefaultChannelId);
 
     const displaySettings = document.getElementById("display-settings");
     const resolutionSetting = document.getElementById("display-resolution-setting");
@@ -267,7 +291,7 @@ async function saveConfig() {
 
   setupMessage.textContent = "Saving…";
   try {
-    const payload = { m3u_url: m3uUrl, autoplay, boot_logo_enabled: bootLogoEnabled };
+    const payload = { m3u_url: m3uUrl, autoplay, boot_logo_enabled: bootLogoEnabled, default_channel_id: document.getElementById("default-channel-input").value };
     if (displayOptions.resolution_control_available) {
       payload.display_resolution = displayResolution;
     }
@@ -285,6 +309,7 @@ async function saveConfig() {
       body: JSON.stringify(payload),
     });
     setupMessage.textContent = result.message || "Settings saved.";
+    savedDefaultChannelId = payload.default_channel_id;
     if (result.reboot_required) showRebootPrompt(result.message);
     else hideSetup();
     loadChannels(true);

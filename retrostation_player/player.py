@@ -6,7 +6,6 @@ import logging
 import os
 import subprocess
 import threading
-import socket
 import time
 import re
 from pathlib import Path
@@ -15,6 +14,7 @@ from typing import Any
 from .channels import Channel
 from .config import state_file
 from .display import normalize_connector_name, normalize_custom_alignment, overscan_padding, resolution_details
+from .mpv_ipc import MpvIpcController, MpvIpcError
 
 logger = logging.getLogger("retrostation_player.player")
 
@@ -76,6 +76,15 @@ class MediaPlayer:
         self._hdmi_alignment_original_value = self.hdmi_underscan_percent
         self._hdmi_alignment_previewing = False
         self._hdmi_alignment_socket = Path("/tmp/retrostation-player-hdmi-alignment.sock")
+        self._hdmi_alignment_ipc = MpvIpcController(self._hdmi_alignment_socket)
+        self._playback_socket = Path("/tmp/retrostation-player.sock")
+        self.playback_ipc = MpvIpcController(self._playback_socket)
+        self._intentional_stop: bool = False
+        self._play_session: int = 0
+        self._failure_count: int = 0
+        self._restart_count: int = 0
+        self._last_failure_reason: str | None = None
+        self._last_failure_time: float | None = None
 
     def configure_output(
         self,
@@ -345,23 +354,10 @@ class MediaPlayer:
         return math.log2(scale)
 
     def _send_mpv_ipc(self, command: list[Any]) -> None:
-        payload = (json.dumps({"command": command}) + "\n").encode()
         try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(2)
-                client.connect(str(self._hdmi_alignment_socket))
-                client.sendall(payload)
-                response = b""
-                while not response.endswith(b"\n"):
-                    chunk = client.recv(4096)
-                    if not chunk:
-                        break
-                    response += chunk
-        except OSError as exc:
+            self._hdmi_alignment_ipc.send_command(command)
+        except MpvIpcError as exc:
             raise PlayerError(f"Unable to communicate with HDMI alignment mpv: {exc}") from exc
-        result = json.loads(response.decode().strip() or "{}")
-        if result.get("error") not in {None, "success"}:
-            raise PlayerError(f"mpv rejected HDMI alignment update: {result.get('error')}")
 
     def _hdmi_alignment_start_timeout(self) -> float:
         """Allow slower HDMI/DRM initialization on the original Pi Zero W."""
@@ -462,10 +458,11 @@ class MediaPlayer:
                 "--really-quiet",
                 "--force-window=yes",
                 "--keep-open=no",
+                f"--input-ipc-server={self._playback_socket}",
             ]
             if self.fullscreen:
                 command.append("--fullscreen")
-            managed_prefixes = ("--drm-mode=", "--drm-connector=", "--audio-device=", "--video-zoom=", "--video-align-x=", "--video-align-y=")
+            managed_prefixes = ("--drm-mode=", "--drm-connector=", "--audio-device=", "--video-zoom=", "--video-align-x=", "--video-align-y=", "--input-ipc-server=")
             if self.hardware_profile == "rpi-zero-w" and self.display_mode == "hdmi":
                 managed_prefixes += (
                     "--profile=", "--vo=", "--gpu-context=", "--hwdec=",
@@ -540,18 +537,76 @@ class MediaPlayer:
         command.append(channel.url)
         return command
 
+    def _watchdog(self, channel: Channel, process: subprocess.Popen, session: int) -> None:
+        """Monitor a playback process and restart the stream on unexpected exit."""
+        exit_code = process.wait()
+
+        with self._lock:
+            if self._intentional_stop or self._play_session != session:
+                return
+            self._failure_count += 1
+            failure_count = self._failure_count
+            self._last_failure_time = time.time()
+            self._last_failure_reason = f"Process exited with code {exit_code}"
+            logger.warning(
+                "Playback failure detected for channel %s (%s): process exited with code %d",
+                channel.name, channel.number, exit_code,
+            )
+
+        delay = min(2 ** min(failure_count - 1, 5), 30)
+        logger.info(
+            "Restarting channel %s (%s) in %.0f s (failure #%d)",
+            channel.name, channel.number, delay, failure_count,
+        )
+        time.sleep(delay)
+
+        with self._lock:
+            if self._intentional_stop or self._play_session != session:
+                return
+
+        try:
+            self.play(channel)
+            with self._lock:
+                self._restart_count += 1
+            logger.info(
+                "Stream restarted successfully for channel %s (%s)",
+                channel.name, channel.number,
+            )
+        except PlayerError as exc:
+            logger.error(
+                "Automatic stream restart failed for channel %s (%s): %s",
+                channel.name, channel.number, exc,
+            )
+            with self._lock:
+                self._last_failure_reason = f"Restart failed: {exc}"
+
     def play(self, channel: Channel) -> None:
         with self._lock:
+            if self._channel is None or self._channel.id != channel.id:
+                self._failure_count = 0
+                self._restart_count = 0
+                self._last_failure_reason = None
+                self._last_failure_time = None
+            self._play_session += 1
+            session = self._play_session
             self.stop(clear_channel=False)
+            self._intentional_stop = False
             command = self._build_command(channel)
             self._start_process(command)
             self._alignment_active = False
             self._channel = channel
             self._write_state(playing=True)
             logger.info("Started %s for channel %s (%s), pid=%s", self.backend, channel.name, channel.number, self._process.pid)
+        threading.Thread(
+            target=self._watchdog,
+            args=(channel, self._process, session),
+            name="playback-watchdog",
+            daemon=True,
+        ).start()
 
     def stop(self, clear_channel: bool = False) -> None:
         with self._lock:
+            self._intentional_stop = True
             process = self._process
             if process and process.poll() is None:
                 try:
@@ -568,6 +623,8 @@ class MediaPlayer:
             if process is not None:
                 logger.info("Stopped %s playback", self.backend)
             self._process = None
+            if self.backend == "mpv":
+                self._playback_socket.unlink(missing_ok=True)
             if clear_channel:
                 self._channel = None
             self._write_state(playing=False)
@@ -604,6 +661,10 @@ class MediaPlayer:
                         else ""
                     ),
                 },
+                "failure_count": self._failure_count,
+                "restart_count": self._restart_count,
+                "last_failure_reason": self._last_failure_reason,
+                "last_failure_time": self._last_failure_time,
             }
 
 

@@ -48,6 +48,7 @@ _EDITABLE_KEYS: frozenset[str] = frozenset(
         "muted",
         "zero_w_video_sizing",
         "boot_logo_enabled",
+        "default_channel_id",
     }
 )
 
@@ -191,7 +192,8 @@ def create_app() -> Flask:
     def autoplay_worker() -> None:
         if not config.get("autoplay", True):
             return
-        channel_id = player.load_saved_channel_id()
+        default_channel_id = str(config.get("default_channel_id", "")).strip()
+        channel_id = default_channel_id or player.load_saved_channel_id()
         if not channel_id:
             return
         while True:
@@ -667,6 +669,9 @@ def create_app() -> Flask:
                 )
             except ValueError as exc:
                 return jsonify({"error": str(exc)}), 400
+
+        if "default_channel_id" in updates:
+            updates["default_channel_id"] = str(updates["default_channel_id"]).strip()
 
         # The Web UI submits the currently displayed values on every save.
         # Remove fields whose values did not actually change so an unrelated

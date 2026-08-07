@@ -29,10 +29,10 @@ Completed items are retained here to show current project status. Version placem
 
 ## v0.2.0
 
-- [ ] mpv JSON IPC controller
+- [x] mpv JSON IPC controller
 - [ ] Software volume and mute control for HDMI playback through mpv IPC
-- [ ] Playback failure detection and automatic stream restart
-- [ ] Configurable default channel independent of last-channel state
+- [x] Playback failure detection and automatic stream restart
+- [x] Configurable default channel independent of last-channel state
 - [ ] Player-process health details and recent failure reason in the Web UI
 - [ ] Installer and runtime diagnostics bundle export beyond the current plain-text log export
 - [ ] Confirm and document Raspberry Pi Zero W operating limits across a wider channel sample
