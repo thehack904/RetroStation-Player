@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import atexit
 import logging
+import secrets
 import threading
 import time
 from typing import Any
+from urllib.parse import urlparse
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from .channels import Channel, fetch_channels, find_channel
 from .config import config_dir, ensure_directories, kernel_cmdline_path, load_config, request_system_reboot, reset_zero_w_composite_overscan, save_config, save_zero_w_composite_overscan, set_startup_screen_enabled, show_startup_screen
 from .display import (
+    connected_connector_names,
     default_resolution,
     detect_hdmi_audio_device,
     detected_resolution_labels,
@@ -31,7 +35,7 @@ from .logs import (
 from .player import MediaPlayer, PlayerError
 from .system_info import collect_system_info
 
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 
 _EDITABLE_KEYS: frozenset[str] = frozenset(
     {
@@ -96,6 +100,20 @@ def create_app() -> Flask:
     logger.info("RetroStation Player starting with hardware profile %s", hardware_profile)
     cached_raspberry_pi_info = initial_system_info if initial_system_info.get("is_raspberry_pi") else None
     app = Flask(__name__, template_folder="../templates", static_folder="../static")
+
+    secret_key = str(config.get("secret_key", "")).strip()
+    if not secret_key:
+        secret_key = secrets.token_hex(32)
+        try:
+            save_config({"secret_key": secret_key})
+            config["secret_key"] = secret_key
+        except OSError:
+            logger.warning(
+                "Could not persist the generated session secret key to %s. "
+                "Sessions will not survive service restarts until the key is saved.",
+                config_dir() / "config.json",
+            )
+    app.secret_key = secret_key
 
     @app.after_request
     def disable_ui_caching(response):
@@ -207,9 +225,99 @@ def create_app() -> Flask:
             except Exception:
                 time.sleep(5)
 
+    _PUBLIC_PATHS = frozenset({"/api/health", "/login", "/logout"})
+
+    @app.before_request
+    def check_auth():
+        if not config.get("auth_enabled", False):
+            return None
+        if request.path in _PUBLIC_PATHS or request.path.startswith("/static/"):
+            return None
+        if session.get("authenticated"):
+            return None
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Authentication required"}), 401
+        return redirect(url_for("login", next=request.path))
+
+    @app.get("/login")
+    @app.post("/login")
+    def login():
+        if not config.get("auth_enabled", False):
+            return redirect(url_for("index"))
+        if request.method == "POST":
+            username = str(request.form.get("username", "")).strip()
+            password = str(request.form.get("password", ""))
+            stored_username = str(config.get("auth_username", "admin"))
+            stored_hash = str(config.get("auth_password_hash", ""))
+            if username == stored_username and stored_hash and check_password_hash(stored_hash, password):
+                session["authenticated"] = True
+                session.permanent = False
+                if config.get("auth_must_change_password", False):
+                    return redirect(url_for("change_password"))
+                next_url = str(request.form.get("next", request.args.get("next", ""))).strip()
+                if next_url:
+                    parsed = urlparse(next_url)
+                    # Reject any URL with a scheme or host to prevent open redirects.
+                    if not parsed.scheme and not parsed.netloc and next_url.startswith("/"):
+                        try:
+                            # Validate the path resolves to a known application route,
+                            # then rebuild the URL from the matched endpoint so that no
+                            # user-supplied string reaches redirect() directly.
+                            urls = app.url_map.bind(request.host)
+                            endpoint, values = urls.match(next_url)
+                            return redirect(urls.build(endpoint, values))
+                        except Exception:
+                            pass
+                return redirect(url_for("index"))
+            return render_template("login.html", version=APP_VERSION, error="Invalid username or password."), 401
+        if session.get("authenticated"):
+            return redirect(url_for("index"))
+        return render_template("login.html", version=APP_VERSION, error=None)
+
+    @app.post("/logout")
+    def logout():
+        session.clear()
+        return redirect(url_for("login"))
+
+    @app.get("/change-password")
+    @app.post("/change-password")
+    def change_password():
+        if not config.get("auth_enabled", False):
+            return redirect(url_for("index"))
+        if not session.get("authenticated"):
+            return redirect(url_for("login"))
+        if request.method == "POST":
+            new_password = str(request.form.get("new_password", ""))
+            confirm_password = str(request.form.get("confirm_password", ""))
+            if not new_password:
+                return render_template("change_password.html", version=APP_VERSION, error="New password cannot be empty."), 400
+            if new_password != confirm_password:
+                return render_template("change_password.html", version=APP_VERSION, error="Passwords do not match."), 400
+            new_hash = generate_password_hash(new_password)
+            save_config({"auth_password_hash": new_hash, "auth_must_change_password": False})
+            config["auth_password_hash"] = new_hash
+            config["auth_must_change_password"] = False
+            return redirect(url_for("index"))
+        return render_template("change_password.html", version=APP_VERSION, error=None)
+
     @app.get("/")
     def index():
-        return render_template("index.html", version=APP_VERSION, asset_version=APP_VERSION, is_zero_w=(hardware_profile == "rpi-zero-w"))
+        return render_template(
+            "index.html",
+            version=APP_VERSION,
+            asset_version=APP_VERSION,
+            auth_enabled=bool(config.get("auth_enabled", False)),
+            is_zero_w=(hardware_profile == "rpi-zero-w"),
+        )
+
+    @app.get("/remote")
+    def remote():
+        return render_template(
+            "remote.html",
+            version=APP_VERSION,
+            asset_version=APP_VERSION,
+            auth_enabled=bool(config.get("auth_enabled", False)),
+        )
 
     @app.get("/api/health")
     def health():
@@ -365,13 +473,37 @@ def create_app() -> Flask:
     @app.get("/api/system/info")
     def system_info_api():
         info = dict(cached_raspberry_pi_info or collect_system_info())
+        display_mode = str(config.get("display_mode", "desktop"))
+        display_connector = str(config.get("display_connector", ""))
+        display_resolution = str(config.get("display_resolution", ""))
+        audio_output = str(config.get("audio_output", "analog"))
+        audio_device = str(config.get("audio_device", ""))
+        if audio_output == "hdmi" and not audio_device:
+            audio_device = detect_hdmi_audio_device(display_connector)
+        audio_control_mode = str(config.get("audio_control_mode", "alsa"))
+        connected_connectors = connected_connector_names("*")
+
+        active_res = display_resolution
+        if not active_res:
+            if display_mode == "composite":
+                active_res = "480i"
+            else:
+                active_res = default_resolution(display_mode, hardware_profile=hardware_profile) or ("Managed externally" if display_mode == "desktop" else "")
+
         info.update(
             {
-                "display_mode": str(config.get("display_mode", "desktop")),
-                "display_connector": str(config.get("display_connector", "")),
-                "display_resolution": str(config.get("display_resolution", "")),
+                "display_mode": display_mode,
+                "display_connector": display_connector,
+                "detected_drm_connectors": connected_connectors,
+                "display_resolution": display_resolution,
+                "active_resolution": active_res,
                 "player_backend": str(config.get("player_backend", "mpv")),
+                "audio_output": audio_output,
+                "audio_device": audio_device,
+                "audio_control_mode": audio_control_mode,
                 "zero_w_video_sizing": str(config.get("zero_w_video_sizing", "auto")),
+                "crt_overscan": str(config.get("crt_overscan", "none")),
+                "hdmi_underscan_percent": int(config.get("hdmi_underscan_percent", 0)),
             }
         )
         return jsonify(info)

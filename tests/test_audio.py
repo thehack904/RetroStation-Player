@@ -228,3 +228,28 @@ def test_zero_w_composite_alignment_pattern_still_uses_runtime_filter():
     assert "--croppadd-paddleft=10" in args
 
 
+def test_vlc_command_uses_managed_composite_output_settings():
+    player = MediaPlayer(
+        backend="vlc",
+        player_path="cvlc",
+        fullscreen=True,
+        extra_args=[
+            "--vout=xcb_x11",
+            "--drm-vout-mode=720x576",
+            "--avcodec-hw=drm_prime",
+            "--no-audio-time-stretch",
+        ],
+        display_mode="composite",
+        display_resolution="480i",
+    )
+    channel = Channel(id="1", number="1", name="Test", url="http://example.test/live", logo="", group="")
+    command = player._build_command(channel)
+
+    assert "--vout=drm_vout" in command
+    assert "--drm-vout-mode=720x480" in command
+    assert "--avcodec-hw=none" in command
+    assert "--vout=xcb_x11" not in command
+    assert "--drm-vout-mode=720x576" not in command
+    assert "--avcodec-hw=drm_prime" not in command
+    assert "--no-audio-time-stretch" in command
+

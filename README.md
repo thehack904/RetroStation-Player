@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="https://github.com/thehack904/RetroStation-Player">
-    <img src="https://img.shields.io/badge/version-v0.2.0-blue?style=for-the-badge" alt="Version">
+    <img src="https://img.shields.io/badge/version-v0.3.0-blue?style=for-the-badge" alt="Version">
   </a>
   <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">
     <img src="https://img.shields.io/badge/license-CC--BY--NC--SA%204.0-lightgrey?style=for-the-badge" alt="License">
@@ -23,7 +23,9 @@ It pairs naturally with [RetroStation MC](https://github.com/thehack904/RetroSta
 - **Pick a channel from your phone or browser** — the Web UI shows your full channel list with logos, names, and numbers
 - **Plays fullscreen on the connected TV** — no remote, no keyboard required on the player itself
 - **Works over HDMI or composite (CRT) output** — connect to a modern TV or a classic television
+- **Uses the validated backend for the selected output mode** — mpv for HDMI/DRM, VLC for Raspberry Pi composite output
 - **Interactive CRT alignment tool** — display a generated test pattern over VLC `drm_vout`, adjust position and dimensions from the Web UI, and save the result as the Custom CRT Overscan preference
+- **Exposes platform and playback information** — view read-only Raspberry Pi model, CPU, active display mode, DRM connectors, resolution, player backend, and audio configuration in the Web UI
 - **Remembers where you left off** — resumes the last channel automatically after a reboot
 - **Adjusts volume from the Web UI** — no need to reach for the TV remote (analog/composite output)
 - **Shows a built-in log viewer** — useful when something goes wrong
@@ -38,7 +40,7 @@ It pairs naturally with [RetroStation MC](https://github.com/thehack904/RetroSta
 | Raspberry Pi 3 Model B / B+ | ✅ | ✅ |
 | Raspberry Pi 4 | ✅ | ✅ |
 | Raspberry Pi 5 | ✅ | — |
-| Debian / Ubuntu x86 Linux | ✅ | — |
+| Debian / Ubuntu / Fedora / RHEL / Arch x86 Linux | ✅ | — |
 
 ---
 

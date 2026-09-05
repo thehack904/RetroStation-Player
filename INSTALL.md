@@ -15,11 +15,13 @@ For a general overview, see the [README](README.md).
 - One of the supported output paths:
   - mpv for HDMI or DRM/KMS output
   - VLC for Raspberry Pi composite output
+- A supported package manager on the host: `apt`, `dnf`/`yum`, or `pacman`
 
-The installer installs the required Debian packages, including:
+The installer detects the active Linux distribution and installs the required distro-appropriate packages, including:
 
-- `python3`, `python3-venv`, `mpv`, `alsa-utils`, `socat`
+- `python3`, `python3-venv`, `python3-pip`, `mpv`, `alsa-utils`, `socat`
 - `vlc` for composite installations
+- `iw` and `fbi` when the selected Raspberry Pi optimization profile requires them
 
 ---
 
@@ -28,7 +30,7 @@ The installer installs the required Debian packages, including:
 Extract the release archive and enter its directory:
 
 ```bash
-cd RetroStation-Player-Private-main
+cd RetroStation-Player-main
 ```
 
 ### Automatic display selection
@@ -57,6 +59,39 @@ sudo ./scripts/setup.sh install --display composite
 sudo ./scripts/setup.sh install --display drm
 ```
 
+### Local authentication
+
+The installer prompts whether to enable local Web UI authentication when the option is not specified on the command line. To enable authentication non-interactively, pass `--auth`:
+
+```bash
+sudo ./scripts/setup.sh install --display auto --auth
+```
+
+When `--auth` is supplied the installer asks whether to use the default credentials (`admin` / `strongpassword123`) or set a custom username and password. The hashed credentials are stored in `/etc/retrostation-player/config.json`. No plaintext passwords are stored.
+
+If default credentials are chosen, `auth_must_change_password` is set to `true` in the configuration. On the first login the player will redirect to a password-change page before granting access to the Web UI. The default password is publicly known, so changing it on first login is required.
+
+If a custom username and password are entered at install time, `auth_must_change_password` is set to `false` and no forced password change occurs.
+
+Authentication can be enabled or disabled after installation by editing `config.json`:
+
+```json
+{
+  "auth_enabled": true,
+  "auth_username": "admin",
+  "auth_password_hash": "<werkzeug pbkdf2 hash>",
+  "auth_must_change_password": false
+}
+```
+
+To generate a replacement hash:
+
+```bash
+python3 -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('newpassword'))"
+```
+
+When authentication is enabled, the Web UI and all API endpoints require a valid session except `GET /api/health`, which the startup screen service uses and remains unauthenticated. Unauthenticated browser requests are redirected to `/login`. Unauthenticated API requests receive a `401 Unauthorized` JSON response.
+
 After installation, open the Web UI at:
 
 ```
@@ -75,6 +110,13 @@ http://192.0.2.123:8409/iptv/channels.m3u
 
 ## Display modes
 
+RetroStation Player selects the playback backend by output mode:
+
+- **HDMI / DRM digital output** → **mpv**
+- **Raspberry Pi composite output** → **VLC**
+
+VLC remains the supported backend for composite installations only. It is not documented or configured here as an alternative HDMI backend.
+
 ### HDMI
 
 HDMI uses mpv with direct DRM/KMS output. The installer:
@@ -90,6 +132,20 @@ When both HDMI connectors are attached, the lowest-numbered connector is selecte
 ### Composite
 
 Composite output uses VLC because mpv did not provide reliable Raspberry Pi composite playback in the validated configuration. This path has been validated on Raspberry Pi 3 / 3B+ and Raspberry Pi 4 hardware with Raspberry Pi OS 13 Lite.
+
+Composite playback uses VLC with:
+
+- `--vout=drm_vout`
+- an explicit `--drm-vout-mode=` derived from the selected composite resolution
+- software decoding (`--avcodec-hw=none`) so VLC's `croppadd` overscan path receives supported frames
+
+Functional differences from the HDMI mpv path:
+
+- Composite resolution choices are the fixed VLC presets `480i`, `576i`, `240`, and `288`, rather than connector-detected HDMI/DRM EDID modes.
+- Composite overscan and CRT alignment use VLC `croppadd`; HDMI picture sizing uses mpv JSON IPC underscan controls.
+- Composite audio uses the ALSA mixer controls exposed by the selected analog device; HDMI audio is routed to the detected HDMI ALSA device and volume remains external to the Web UI.
+- Composite startup keeps the ready splash visible until VLC takes control; pressing **Stop** returns the ready splash just as it does on the HDMI path.
+- Unexpected player exits use the same RetroStation Player watchdog restart flow on both backends, while intentional stops and channel changes suppress automatic restarts.
 
 Available composite resolutions:
 
@@ -185,6 +241,16 @@ The installed configuration is stored at:
 /etc/systemd/system/retrostation-player.service
 ```
 
+The validated composite backend does not change the managed RetroStation Player service identity, port, or install paths:
+
+- Service user/group: `retrostation-player`
+- Web UI port: `5050`
+- Application path: `/opt/retrostation-player`
+- Configuration path: `/etc/retrostation-player`
+- State path: `/var/lib/retrostation-player`
+
+The installer and uninstall flows do not modify RetroStation MC or RetroIPTVGuide services, users, ports, files, or installation paths.
+
 Useful service commands:
 
 ```bash
@@ -245,8 +311,8 @@ RetroStation Player is isolated from RetroStation MC and RetroIPTVGuide:
 
 | Application | Service | Default port | Application path |
 |---|---|---:|---|
-| RetroIPTVGuide | `retroiptvguide.service` | 5000 | `/home/iptv/iptv-server` |
-| RetroStation MC | `retrostation-mc.service` | 8787 | `/home/iptv/retrostation-mc` |
+| RetroIPTVGuide | `retroiptvguide.service` | 5000 | installation-dependent |
+| RetroStation MC | `retrostation-mc.service` | 8787 | installation-dependent |
 | RetroStation Player | `retrostation-player.service` | 5050 | `/opt/retrostation-player` |
 
 ### HDMI overscan correction

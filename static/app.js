@@ -198,12 +198,26 @@ function formatBytes(bytes) {
 }
 
 function setSystemText(id, value) {
-  document.getElementById(id).textContent = value || "Unknown";
+  const el = document.getElementById(id);
+  if (el) {
+    el.textContent = value || "—";
+  }
 }
 
 async function loadSystemInfo() {
   try {
     const info = await api("/api/system/info");
+
+    const isPi = Boolean(info.is_raspberry_pi);
+    const piModel = info.raspberry_pi_model || (isPi ? info.machine : "");
+    const piRow = document.getElementById("system-raspberry-pi-row");
+    if (piRow) {
+      piRow.hidden = !isPi;
+    }
+    if (isPi) {
+      setSystemText("system-raspberry-pi-model", piModel || "Raspberry Pi");
+    }
+
     setSystemText("system-machine", info.machine);
     setSystemText("system-os", info.operating_system);
     setSystemText("system-kernel", info.kernel);
@@ -212,12 +226,41 @@ async function loadSystemInfo() {
     setSystemText("system-processor", info.processor);
     setSystemText("system-cpu-cores", String(info.cpu_cores || "Unknown"));
     setSystemText("system-memory", formatBytes(info.memory_bytes));
+
     setSystemText("system-display-mode", String(info.display_mode || "desktop").toUpperCase());
-    setSystemText("system-display-connector", info.display_connector || "Not applicable");
-    setSystemText("system-display-resolution", info.display_resolution || "Managed externally");
+    setSystemText("system-display-connector", info.display_connector || "None / Default");
+
+    const detectedConnectors = Array.isArray(info.detected_drm_connectors) && info.detected_drm_connectors.length > 0
+      ? info.detected_drm_connectors.join(", ")
+      : "None detected";
+    setSystemText("system-drm-connectors", detectedConnectors);
+
+    const resolution = info.display_resolution || info.active_resolution || (info.display_mode === "desktop" ? "Managed externally" : "System default");
+    setSystemText("system-display-resolution", resolution);
+
     setSystemText("system-player-backend", String(info.player_backend || "Unknown").toUpperCase());
-    document.getElementById("system-connector-row").hidden = !info.display_connector;
-    document.getElementById("system-resolution-row").hidden = !info.display_resolution;
+
+    const audioOutput = String(info.audio_output || "analog").toUpperCase();
+    setSystemText("system-audio-output", audioOutput);
+
+    const audioDevice = info.audio_device || "Default";
+    setSystemText("system-audio-device", audioDevice);
+
+    let drmKmsDetails = [];
+    if (info.hardware_profile) {
+      drmKmsDetails.push(`Profile: ${info.hardware_profile}`);
+    }
+    if (info.display_mode === "composite") {
+      drmKmsDetails.push(`CRT Overscan: ${info.crt_overscan || "none"}`);
+    } else if (info.display_mode === "hdmi") {
+      if (typeof info.hdmi_underscan_percent === "number" && info.hdmi_underscan_percent > 0) {
+        drmKmsDetails.push(`HDMI Underscan: ${info.hdmi_underscan_percent}%`);
+      }
+      if (info.zero_w_video_sizing && info.hardware_profile === "rpi-zero-w") {
+        drmKmsDetails.push(`Zero W Sizing: ${info.zero_w_video_sizing}`);
+      }
+    }
+    setSystemText("system-drm-kms", drmKmsDetails.length > 0 ? drmKmsDetails.join(" | ") : "Standard");
   } catch (_) {
     setSystemText("system-machine", "Unavailable");
   }

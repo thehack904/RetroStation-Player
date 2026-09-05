@@ -11,6 +11,7 @@ PLAYBACK_TTY="${RETROSTATION_PLAYER_PLAYBACK_TTY:-2}"
 STARTING_LOGO_PATH="${RETROSTATION_PLAYER_STARTING_LOGO_PATH:-/opt/retrostation-player/static/boot-logo-starting.png}"
 READY_LOGO_PATH="${RETROSTATION_PLAYER_READY_LOGO_PATH:-/opt/retrostation-player/static/boot-logo-ready.png}"
 FBI_PID=""
+MPV_PID=""
 
 clear_screen(){ printf '\033[2J\033[H'; }
 hide_cursor(){ printf '\033[?25l'; }
@@ -26,21 +27,65 @@ cleanup_image(){
     wait "$FBI_PID" 2>/dev/null || true
     FBI_PID=""
   fi
+  if [[ -n "$MPV_PID" ]]; then
+    kill "$MPV_PID" 2>/dev/null || true
+    wait "$MPV_PID" 2>/dev/null || true
+    MPV_PID=""
+  fi
   pkill -TERM -x fbi 2>/dev/null || true
 }
 cleanup(){ cleanup_image; show_cursor || true; }
 trap cleanup EXIT INT TERM
 
+# Return true when running on a Raspberry Pi 4 or newer (Pi 4, Pi 400, CM4,
+# Pi 5, …). These models use the full KMS vc4-kms-v3d driver where fbi cannot
+# reliably write through the framebuffer emulation layer to the visible display.
+_is_rpi4_or_newer(){
+  local compat_file="/proc/device-tree/compatible"
+  [[ -r "$compat_file" ]] || return 1
+  tr '\0' '\n' < "$compat_file" 2>/dev/null | grep -Eq 'raspberrypi,[4-9][0-9]*[^0-9]|raspberrypi,[4-9][0-9]*$'
+}
+
+# Display a splash image using mpv with the DRM/KMS backend. This works on
+# Pi 4/5 where the framebuffer-based fbi tool does not reach the display.
+_show_logo_mpv(){
+  local image_path="$1"
+  command -v mpv >/dev/null 2>&1 || return 1
+  local cards=(/dev/dri/card*)
+  [[ -e "${cards[0]}" ]] || return 1
+  local connector=""
+  local config_file="${RETROSTATION_PLAYER_CONFIG_FILE:-/etc/retrostation-player/config.json}"
+  if [[ -r "$config_file" ]]; then
+    connector="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('display_connector',''))" "$config_file" 2>/dev/null || true)"
+  fi
+  local mpv_args=(--no-audio --image-display-duration=inf --loop-file=inf --vo=drm)
+  [[ -n "$connector" ]] && mpv_args+=(--drm-connector="$connector")
+  mpv "${mpv_args[@]}" "$image_path" >/dev/null 2>&1 &
+  MPV_PID=$!
+  sleep 0.5
+  kill -0 "$MPV_PID" 2>/dev/null || { MPV_PID=""; return 1; }
+  return 0
+}
+
 show_logo_image(){
   local image_path="$1"
   cleanup_image
   [[ -r "$image_path" ]] || return 1
-  command -v fbi >/dev/null 2>&1 || return 1
-  [[ -e /dev/fb0 ]] || return 1
-  fbi -T 1 -d /dev/fb0 -noverbose -a -1 "$image_path" </dev/tty1 >/dev/null 2>&1 &
-  FBI_PID=$!
-  sleep 0.5
-  kill -0 "$FBI_PID" 2>/dev/null || { FBI_PID=""; return 1; }
+  # On Raspberry Pi 4 and 5, fbi cannot reliably display images through the
+  # KMS-backed framebuffer emulation (vc4-kms-v3d). Skip straight to the mpv
+  # DRM backend on those platforms.
+  if ! _is_rpi4_or_newer; then
+    if command -v fbi >/dev/null 2>&1 && [[ -e /dev/fb0 ]]; then
+      fbi -T 1 -d /dev/fb0 -noverbose -a -1 "$image_path" </dev/tty1 >/dev/null 2>&1 &
+      FBI_PID=$!
+      sleep 0.5
+      if kill -0 "$FBI_PID" 2>/dev/null; then
+        return 0
+      fi
+      FBI_PID=""
+    fi
+  fi
+  _show_logo_mpv "$image_path"
 }
 
 draw_text_logo(){

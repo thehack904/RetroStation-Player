@@ -8,16 +8,16 @@ from typing import Any
 from .display import normalize_connector_name
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "m3u_url": "http://ersatztv.local:8409/iptv/channels.m3u",
+    "m3u_url": "http://192.0.2.123:8409/iptv/channels.m3u",
     "listen_host": "0.0.0.0",
     "listen_port": 5050,
     "autoplay": True,
     "fullscreen": True,
     "player_backend": "mpv",
     "player_path": "mpv",
-    "player_extra_args": ["--hwdec=auto-safe", "--no-osc", "--no-input-default-bindings"],
+    "player_extra_args": ["--no-osc", "--no-input-default-bindings"],
     "mpv_path": "mpv",
-    "mpv_extra_args": ["--hwdec=auto-safe", "--no-osc", "--no-input-default-bindings"],
+    "mpv_extra_args": ["--no-osc", "--no-input-default-bindings"],
     "request_timeout_seconds": 15,
     "display_mode": "desktop",
     "display_connector": "",
@@ -36,6 +36,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "streaming_notice_acknowledged": False,
     "boot_logo_enabled": True,
     "default_channel_id": "",
+    "auth_enabled": False,
+    "auth_username": "admin",
+    "auth_password_hash": "",
+    "auth_must_change_password": False,
+    "secret_key": "",
 }
 
 

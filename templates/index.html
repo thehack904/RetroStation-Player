@@ -54,6 +54,12 @@
         <button id="logs-button" type="button" aria-expanded="false" aria-controls="logs-panel">Logs</button>
         <button id="settings-button" type="button" aria-expanded="false" aria-controls="setup-panel">Settings</button>
         <button id="about-button" type="button" aria-expanded="false" aria-controls="about-panel">About</button>
+        <a href="/remote" class="footer-nav-link">Remote</a>
+        {% if auth_enabled %}
+        <form action="{{ url_for('logout') }}" method="post" class="logout-form">
+          <button type="submit" class="logout-button">Logout</button>
+        </form>
+        {% endif %}
       </nav>
 
       <section id="logs-panel" class="panel logs-panel" hidden aria-labelledby="logs-heading" data-zero-w="{{ 'true' if is_zero_w else 'false' }}">
@@ -209,10 +215,11 @@
         <p class="about-version">RetroStation Player <span class="version">v{{ version }}</span></p>
         <section class="system-information" aria-labelledby="system-information-heading">
           <div class="system-information-heading">
-            <h3 id="system-information-heading">System Information</h3>
-            <p>Detected hardware and runtime environment.</p>
+            <h3 id="system-information-heading">Platform &amp; Playback Information</h3>
+            <p>Detected hardware and runtime configuration.</p>
           </div>
           <dl id="system-information-list" class="system-information-list">
+            <div id="system-raspberry-pi-row" hidden><dt>Raspberry Pi Model</dt><dd id="system-raspberry-pi-model">—</dd></div>
             <div><dt>Machine</dt><dd id="system-machine">Detecting…</dd></div>
             <div><dt>Operating System</dt><dd id="system-os">—</dd></div>
             <div><dt>Kernel</dt><dd id="system-kernel">—</dd></div>
@@ -222,9 +229,13 @@
             <div><dt>CPU Cores</dt><dd id="system-cpu-cores">—</dd></div>
             <div><dt>Memory</dt><dd id="system-memory">—</dd></div>
             <div><dt>Display Mode</dt><dd id="system-display-mode">—</dd></div>
-            <div id="system-connector-row"><dt>Active Connector</dt><dd id="system-display-connector">—</dd></div>
+            <div id="system-connector-row"><dt>Active DRM Connector</dt><dd id="system-display-connector">—</dd></div>
+            <div id="system-drm-connectors-row"><dt>Detected DRM Connectors</dt><dd id="system-drm-connectors">—</dd></div>
             <div id="system-resolution-row"><dt>Display Resolution</dt><dd id="system-display-resolution">—</dd></div>
             <div><dt>Player Backend</dt><dd id="system-player-backend">—</dd></div>
+            <div id="system-audio-output-row"><dt>Audio Output</dt><dd id="system-audio-output">—</dd></div>
+            <div id="system-audio-device-row"><dt>Audio Device</dt><dd id="system-audio-device">—</dd></div>
+            <div id="system-drm-kms-row"><dt>DRM / KMS Information</dt><dd id="system-drm-kms">—</dd></div>
           </dl>
         </section>
       </section>

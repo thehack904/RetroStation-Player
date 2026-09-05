@@ -2,9 +2,23 @@
 
 All notable changes to RetroStation Player are documented here.
 
-## Unreleased
+## [0.3.0] - 2026-08-09
 
-No unreleased changes currently documented.
+### Added
+
+- **Distro-aware packaging support**: The installer now detects the host package manager (`apt`, `dnf`/`yum`, or `pacman`) and installs the required Linux packages without assuming a Debian-only environment. This broadens Linux packaging support while preserving the existing RetroStation Player, RetroIPTVGuide, and RetroStation MC service, user, port, file, and installation-path boundaries.
+
+- **Exposed platform and playback information in the Web UI**: Added a read-only platform and playback information section to the Web UI (under About / Platform & Playback Information). Displays detected Raspberry Pi model (when running on Raspberry Pi hardware), machine name, operating system, kernel, CPU processor & cores, memory, active display mode, active DRM connector, detected DRM connectors on the system, active/configured display resolution, player backend (`mpv` or `VLC`), audio output mode, audio device, and DRM/KMS configuration details. Exposed these fields via the `/api/system/info` endpoint while maintaining clean fallbacks for unavailable values.
+
+- **Optional local authentication**: The Web UI can now require a username and password before granting access. Authentication is disabled by default and can be enabled during installation via an interactive prompt or the `--auth` installer flag. Credentials are stored as a Werkzeug PBKDF2 password hash in the configuration file. All routes except `GET /api/health` (used by the startup screen) enforce the session when authentication is enabled. Unauthenticated browser requests are redirected to `/login`; unauthenticated API requests receive a `401 Unauthorized` JSON response. The `auth_enabled`, `auth_username`, `auth_password_hash`, and `secret_key` configuration keys are added with secure defaults.
+
+- Automated coverage confirming that the backend-agnostic playback watchdog also protects the supported VLC composite path, including unexpected-exit restart, failure tracking, intentional-stop suppression, channel-change suppression, and VLC process cleanup.
+
+### Changed
+
+- Documented the validated backend split explicitly: mpv remains the supported backend for HDMI/DRM playback, while VLC remains the supported backend for Raspberry Pi composite output.
+- Documented the composite-specific VLC requirements: `drm_vout`, explicit composite `drm-vout-mode`, software-decoded frames for `croppadd`, ALSA analog/composite volume behavior, splash-screen handoff expectations, and compatibility boundaries for RetroStation MC / RetroIPTVGuide services, users, ports, files, and install paths.
+- Removed the residual generic mpv `--hwdec=auto-safe` defaults from application, example, and installer-managed configuration so Pi Zero W HDMI keeps explicit `v4l2m2m`, composite keeps VLC software decoding, and other playback paths no longer imply automatic hardware acceleration.
 
 ## [0.2.0] - 2026-08-01
 

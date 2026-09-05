@@ -40,11 +40,13 @@ Completed items are retained here to show current project status. Version placem
 
 ## v0.3.0
 
+- [x] Validate and document VLC composite-output backend
+- [x] Expose detected platform and playback information in the Web UI
 - [ ] Multiple M3U sources and XMLTV sources
 - [ ] Channel capability analysis and warnings for resource-constrained hardware
-- [ ] Optional local authentication
+- [x] Optional local authentication
 - [ ] Hardware acceleration and output capability detection by platform
-- [ ] Additional Linux packaging formats
+- [x] Additional Linux packaging formats
 - [ ] Web UI selection when multiple displays are connected simultaneously
 - [ ] Optional software scaling and aspect-ratio controls for HDMI/DRM output
 
