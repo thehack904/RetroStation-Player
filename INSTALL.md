@@ -30,7 +30,6 @@ The installer detects the active Linux distribution and installs the required di
 Extract the release archive and enter its directory:
 
 ```bash
-cd RetroStation-Player-main
 ```
 
 ### Automatic display selection
@@ -311,8 +310,8 @@ RetroStation Player is isolated from RetroStation MC and RetroIPTVGuide:
 
 | Application | Service | Default port | Application path |
 |---|---|---:|---|
-| RetroIPTVGuide | `retroiptvguide.service` | 5000 | installation-dependent |
-| RetroStation MC | `retrostation-mc.service` | 8787 | installation-dependent |
+| RetroIPTVGuide | `retroiptvguide.service` | 5000 | `/home/iptv/iptv-server` |
+| RetroStation MC | `retrostation-mc.service` | 8787 | `/home/iptv/retrostation-mc` |
 | RetroStation Player | `retrostation-player.service` | 5050 | `/opt/retrostation-player` |
 
 ### HDMI overscan correction

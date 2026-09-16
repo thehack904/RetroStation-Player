@@ -174,7 +174,7 @@ body.is-playing #player-state { color: var(--teal); }
 @media (max-width: 600px) {
   .brand-header,
   .now-playing { align-items: stretch; flex-direction: column; }
-  .brand-lockup { width: 100%; }
+  .brand-lockup { width: 100%; flex: 0 1 auto; }
   .header-actions { width: 100%; justify-content: space-between; }
   .controls button { flex: 1; }
   .toolbar { flex-wrap: wrap; }

@@ -8,7 +8,7 @@ from typing import Any
 from .display import normalize_connector_name
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "m3u_url": "http://192.0.2.123:8409/iptv/channels.m3u",
+    "m3u_url": "http://ersatztv.local:8409/iptv/channels.m3u",
     "listen_host": "0.0.0.0",
     "listen_port": 5050,
     "autoplay": True,
