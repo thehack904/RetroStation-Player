@@ -7,7 +7,6 @@
   "player_backend": "mpv",
   "player_path": "mpv",
   "player_extra_args": [
-    "--hwdec=auto-safe",
     "--no-osc",
     "--no-input-default-bindings"
   ],
@@ -27,5 +26,10 @@
   "audio_control": "auto",
   "zero_w_video_sizing": "auto",
   "boot_logo_enabled": true,
-  "streaming_notice_acknowledged": false
+  "streaming_notice_acknowledged": false,
+  "auth_enabled": false,
+  "auth_username": "admin",
+  "auth_password_hash": "",
+  "auth_must_change_password": false,
+  "secret_key": ""
 }

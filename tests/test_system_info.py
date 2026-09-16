@@ -31,3 +31,15 @@ def test_memory_total_bytes(monkeypatch):
 def test_zero_w_hardware_profile(monkeypatch):
     monkeypatch.setattr(system_info, '_device_tree_compatible', lambda: ['raspberrypi,model-zero-w', 'brcm,bcm2835'])
     assert system_info.detect_hardware_profile() == 'rpi-zero-w'
+
+
+def test_collect_system_info_raspberry_pi_model(monkeypatch):
+    monkeypatch.setattr(system_info, '_read_text', lambda path: 'Raspberry Pi 4 Model B Rev 1.2' if path == system_info._DEVICE_TREE_MODEL else '')
+    info = system_info.collect_system_info()
+    assert info['is_raspberry_pi'] is True
+    assert info['raspberry_pi_model'] == 'Raspberry Pi 4 Model B Rev 1.2'
+
+    monkeypatch.setattr(system_info, '_read_text', lambda path: '')
+    info_non_pi = system_info.collect_system_info()
+    assert info_non_pi['is_raspberry_pi'] is False
+    assert info_non_pi['raspberry_pi_model'] is None

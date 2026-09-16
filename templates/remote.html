@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#1a1a1a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="RetroStation Remote">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>RetroStation Remote</title>
+  <link rel="stylesheet" href="/static/remote.css?v={{ asset_version }}">
+</head>
+<body>
+  <div class="remote-shell">
+
+    <div class="remote-body">
+
+      <header class="remote-brand">
+        <span class="remote-brand-name">RetroStation</span>
+        <div class="remote-header-actions">
+          <a href="/" class="remote-link header-link" title="Open full settings UI">&#9881;</a>
+          {% if auth_enabled %}
+          <form action="{{ url_for('logout') }}" method="post" class="remote-logout-form">
+            <button type="submit" class="remote-btn remote-logout-btn" aria-label="Log out">LOG OUT</button>
+          </form>
+          {% endif %}
+          <button id="fullscreen-btn" class="icon-btn fullscreen-btn" title="Toggle fullscreen" aria-label="Toggle fullscreen">&#x26F6;</button>
+        </div>
+      </header>
+
+      <div class="remote-screen">
+        <div class="screen-scanlines"></div>
+        <div class="screen-content">
+          <div id="screen-channel" class="screen-channel">&#8212;</div>
+          <div id="screen-state" class="screen-state">Stopped</div>
+        </div>
+      </div>
+
+      <div class="remote-section channel-nav">
+        <button class="remote-btn channel-btn" id="ch-up" aria-label="Channel up">&#9650; CH</button>
+        <div class="channel-direct">
+          <span class="label">CH</span>
+          <div class="numpad-display" id="numpad-display">&nbsp;</div>
+        </div>
+        <button class="remote-btn channel-btn" id="ch-down" aria-label="Channel down">&#9660; CH</button>
+      </div>
+
+      <div class="remote-section power-row">
+        <button class="remote-btn power-btn" id="stop-btn" aria-label="Stop">&#9632; STOP</button>
+        <button class="remote-btn power-btn play-btn" id="restart-btn" aria-label="Restart / Play">&#9654; PLAY</button>
+      </div>
+
+      <div class="remote-section numpad">
+        <button class="remote-btn num-btn" data-digit="1">1</button>
+        <button class="remote-btn num-btn" data-digit="2">2</button>
+        <button class="remote-btn num-btn" data-digit="3">3</button>
+        <button class="remote-btn num-btn" data-digit="4">4</button>
+        <button class="remote-btn num-btn" data-digit="5">5</button>
+        <button class="remote-btn num-btn" data-digit="6">6</button>
+        <button class="remote-btn num-btn" data-digit="7">7</button>
+        <button class="remote-btn num-btn" data-digit="8">8</button>
+        <button class="remote-btn num-btn" data-digit="9">9</button>
+        <button class="remote-btn num-btn num-clear" id="num-clear">CLR</button>
+        <button class="remote-btn num-btn" data-digit="0">0</button>
+        <button class="remote-btn num-btn num-go" id="num-go">GO</button>
+      </div>
+
+      <div class="remote-section volume-row">
+        <div class="vol-group">
+          <button class="remote-btn vol-btn" id="vol-up" aria-label="Volume up">&#9650; VOL</button>
+          <button class="remote-btn vol-btn" id="vol-down" aria-label="Volume down">&#9660; VOL</button>
+        </div>
+        <button class="remote-btn mute-btn" id="mute-btn" aria-label="Mute / Unmute" aria-pressed="false">MUTE</button>
+        <div class="vol-indicator">
+          <div class="vol-bar-track">
+            <div class="vol-bar-fill" id="vol-bar"></div>
+          </div>
+          <span class="vol-label" id="vol-label">100%</span>
+        </div>
+      </div>
+
+      <div class="remote-section status-row">
+        <span id="status-msg" class="status-msg" aria-live="polite"></span>
+      </div>
+
+      <div class="remote-section channel-list-section">
+        <div class="channel-list-wrap">
+          <button class="remote-btn channel-list-toggle" id="channel-list-toggle" aria-expanded="false" aria-controls="channel-list-dropdown">
+            &#9776; CHANNELS
+          </button>
+          <div class="channel-list-dropdown" id="channel-list-dropdown" hidden>
+            <div id="channel-list-items" class="channel-list-items"></div>
+          </div>
+        </div>
+      </div>
+
+      <footer class="remote-footer">
+        <span>RetroStation Remote v{{ version }}</span>
+      </footer>
+
+    </div>
+  </div>
+
+  <!-- iOS "Add to Home Screen" modal -->
+  <div id="ios-modal" class="ios-modal" role="dialog" aria-modal="true" aria-labelledby="ios-modal-title" hidden>
+    <div class="ios-modal-backdrop"></div>
+    <div class="ios-modal-box">
+      <h2 id="ios-modal-title" class="ios-modal-title">Add to Home Screen</h2>
+
+      <!-- Step-by-step instructions (default view) -->
+      <div id="ios-modal-steps-view">
+        <p class="ios-modal-body">
+          For the best experience, add RetroStation Remote to your Home Screen so it runs fullscreen.
+        </p>
+        <ol class="ios-modal-steps">
+          <li>Tap the <strong>Share</strong> button <span class="ios-share-icon">&#x2B06;</span> at the bottom of Safari</li>
+          <li>Scroll down and tap <strong>"Add to Home Screen"</strong></li>
+          <li>Tap <strong>"Add"</strong> in the top-right corner</li>
+        </ol>
+        <div class="ios-modal-actions">
+          <button id="ios-modal-doit" class="remote-btn ios-modal-btn ios-modal-btn-primary">Show Me How</button>
+          <button id="ios-modal-ok" class="remote-btn ios-modal-btn">OK</button>
+        </div>
+      </div>
+
+      <!-- Visual guide shown after tapping "Do it for me" -->
+      <div id="ios-modal-guide-view" hidden>
+        <p class="ios-modal-body">
+          Tap the <strong>Share</strong> button at the bottom of your screen, then choose <strong>"Add to Home Screen"</strong>.
+        </p>
+        <div class="ios-guide-arrow-wrap" aria-hidden="true">
+          <p class="ios-guide-label">Tap here &#x2193;</p>
+          <div class="ios-guide-arrow">&#x25BC;</div>
+          <div class="ios-guide-bar">
+            <span class="ios-guide-share-btn">&#x2B06;</span>
+          </div>
+        </div>
+        <div class="ios-modal-actions">
+          <button id="ios-modal-guide-ok" class="remote-btn ios-modal-btn ios-modal-btn-primary">Got it</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/remote.js?v={{ asset_version }}"></script>
+</body>
+</html>

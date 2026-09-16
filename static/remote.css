@@ -1,0 +1,689 @@
+/* ==========================================================
+   RetroStation Remote Control – Classic TV Remote Styling
+   ========================================================== */
+
+:root {
+  --remote-bg: #1c1c1e;
+  --remote-surface: #2a2a2d;
+  --remote-border: #3a3a3d;
+  --remote-accent: #e53e2f;
+  --remote-accent-dark: #b83020;
+  --remote-text: #f0ede8;
+  --remote-text-dim: #888;
+  --remote-btn-bg: #333337;
+  --remote-btn-border: #484850;
+  --remote-btn-hover: #444448;
+  --remote-btn-active: #222224;
+  --remote-screen-bg: #0a1a0a;
+  --remote-screen-glow: #00ff4433;
+  --remote-green: #39d353;
+  --remote-shadow: 0 4px 12px rgba(0,0,0,0.6);
+  --remote-radius: 16px;
+  --remote-btn-radius: 8px;
+  --font-main: 'Courier New', Courier, monospace;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  height: 100%;
+  background: #111;
+  font-family: var(--font-main);
+  color: var(--remote-text);
+  overscroll-behavior: none;
+}
+
+/* ---- Fullscreen target ---- */
+:fullscreen .remote-shell,
+:-webkit-full-screen .remote-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #111;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---- Outer shell ---- */
+.remote-shell {
+  min-height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8px 8px 16px;
+}
+
+/* ---- Remote body ---- */
+.remote-body {
+  width: 100%;
+  max-width: 360px;
+  background: var(--remote-bg);
+  border-radius: var(--remote-radius);
+  border: 2px solid var(--remote-border);
+  box-shadow:
+    var(--remote-shadow),
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    0 0 0 1px rgba(255,255,255,0.03);
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ---- Brand header ---- */
+.remote-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.remote-brand-name {
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--remote-accent);
+  font-weight: bold;
+}
+
+/* ---- Screen ---- */
+.remote-screen {
+  position: relative;
+  background: var(--remote-screen-bg);
+  border-radius: 8px;
+  border: 2px solid #1f3a1f;
+  box-shadow: inset 0 0 20px rgba(0, 255, 68, 0.08), 0 2px 8px rgba(0,0,0,0.5);
+  overflow: hidden;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.screen-scanlines {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.18) 2px,
+    rgba(0,0,0,0.18) 4px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+.screen-content {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+  padding: 6px 14px;
+}
+
+.screen-channel {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: var(--remote-green);
+  text-shadow: 0 0 8px rgba(57,211,83,0.6);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+
+.screen-state {
+  font-size: 0.7rem;
+  color: #57d;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-top: 2px;
+  text-shadow: 0 0 6px rgba(85,119,221,0.5);
+}
+
+/* ---- Section wrapper ---- */
+.remote-section {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ---- Buttons (base) ---- */
+.remote-btn {
+  font-family: var(--font-main);
+  font-size: 0.78rem;
+  font-weight: bold;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--remote-text);
+  background: var(--remote-btn-bg);
+  border: 1.5px solid var(--remote-btn-border);
+  border-radius: var(--remote-btn-radius);
+  cursor: pointer;
+  padding: 8px 6px;
+  transition: background 0.1s, transform 0.05s, box-shadow 0.1s;
+  user-select: none;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06);
+  -webkit-user-select: none;
+}
+
+.remote-btn:hover {
+  background: var(--remote-btn-hover);
+}
+
+.remote-btn:active {
+  background: var(--remote-btn-active);
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+/* ---- Channel nav ---- */
+.channel-nav {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.channel-btn {
+  flex: 0 0 80px;
+  padding: 9px 6px;
+}
+
+.channel-direct {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.channel-direct .label {
+  font-size: 0.6rem;
+  color: var(--remote-text-dim);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.numpad-display {
+  background: #0a140a;
+  border: 1.5px solid #1f3a1f;
+  border-radius: 4px;
+  min-width: 64px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  color: var(--remote-green);
+  text-shadow: 0 0 6px rgba(57,211,83,0.5);
+  letter-spacing: 0.1em;
+}
+
+/* ---- Power row ---- */
+.power-row {
+  justify-content: center;
+  gap: 12px;
+}
+
+.power-btn {
+  flex: 1;
+  padding: 9px 4px;
+}
+
+.play-btn {
+  background: #1f3d1f;
+  border-color: #2f6a2f;
+  color: var(--remote-green);
+}
+
+.play-btn:hover {
+  background: #254825;
+}
+
+.play-btn:active {
+  background: #172e17;
+}
+
+/* ---- Numpad ---- */
+.numpad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.num-btn {
+  padding: 10px 4px;
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+.num-clear {
+  background: #2a1c1c;
+  border-color: #4a2a2a;
+  color: #e57373;
+}
+
+.num-clear:hover {
+  background: #331e1e;
+}
+
+.num-go {
+  background: #1f2e1f;
+  border-color: #2f4a2f;
+  color: var(--remote-green);
+}
+
+.num-go:hover {
+  background: #243524;
+}
+
+/* ---- Volume row ---- */
+.volume-row {
+  align-items: center;
+  gap: 10px;
+}
+
+.volume-row[hidden] {
+  display: none;
+}
+
+.vol-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.vol-btn {
+  padding: 7px 14px;
+  font-size: 0.7rem;
+}
+
+.mute-btn {
+  padding: 8px 12px;
+  flex: 0 0 auto;
+}
+
+.mute-btn[aria-pressed="true"] {
+  background: #3a1a1a;
+  border-color: var(--remote-accent);
+  color: var(--remote-accent);
+}
+
+.vol-indicator {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.vol-bar-track {
+  width: 100%;
+  height: 8px;
+  background: #1a1a1a;
+  border-radius: 4px;
+  border: 1px solid var(--remote-border);
+  overflow: hidden;
+}
+
+.vol-bar-fill {
+  height: 100%;
+  width: 100%;
+  background: var(--remote-green);
+  border-radius: 4px;
+  transition: width 0.2s ease;
+}
+
+.vol-label {
+  font-size: 0.65rem;
+  color: var(--remote-text-dim);
+}
+
+/* ---- Settings row → Status row ---- */
+.status-row {
+  justify-content: center;
+  min-height: 1.2em;
+  padding-top: 2px;
+}
+
+.status-msg {
+  font-size: 0.62rem;
+  color: var(--remote-text-dim);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.status-msg.error {
+  color: var(--remote-accent);
+}
+
+.status-msg.ok {
+  color: var(--remote-green);
+}
+
+/* ---- Header actions cluster ---- */
+.remote-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.header-link {
+  font-size: 1rem;
+  line-height: 1;
+  padding: 4px;
+  border-radius: 4px;
+  text-decoration: none;
+  color: var(--remote-text-dim);
+  transition: color 0.15s;
+}
+
+.header-link:hover {
+  color: var(--remote-text);
+}
+
+/* ---- Fullscreen button ---- */
+.icon-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--remote-text-dim);
+  font-size: 1rem;
+  padding: 4px;
+  line-height: 1;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.icon-btn:hover {
+  color: var(--remote-text);
+}
+
+/* ---- Channel list dropdown ---- */
+.channel-list-section {
+  flex-direction: column;
+  gap: 0;
+}
+
+.channel-list-wrap {
+  width: 100%;
+  position: relative;
+}
+
+.channel-list-toggle {
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  letter-spacing: 0.1em;
+}
+
+.channel-list-dropdown {
+  width: 100%;
+  background: var(--remote-screen-bg);
+  border: 1.5px solid #1f3a1f;
+  border-top: none;
+  border-radius: 0 0 var(--remote-btn-radius) var(--remote-btn-radius);
+  max-height: 220px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #1f3a1f var(--remote-screen-bg);
+}
+
+.channel-list-dropdown[hidden] {
+  display: none;
+}
+
+.channel-list-toggle[aria-expanded="true"] {
+  border-radius: var(--remote-btn-radius) var(--remote-btn-radius) 0 0;
+  border-bottom-color: #1f3a1f;
+  background: #0f1f0f;
+  color: var(--remote-green);
+}
+
+.channel-list-items {
+  display: flex;
+  flex-direction: column;
+}
+
+.channel-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-family: var(--font-main);
+  font-size: 0.78rem;
+  color: var(--remote-text);
+  border: none;
+  background: transparent;
+  text-align: left;
+  width: 100%;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid rgba(31,58,31,0.5);
+  transition: background 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.channel-list-item:last-child {
+  border-bottom: none;
+}
+
+.channel-list-item:hover,
+.channel-list-item:focus {
+  background: #0f2a0f;
+  outline: none;
+}
+
+.channel-list-item:active {
+  background: #071507;
+}
+
+.channel-list-item.active {
+  color: var(--remote-green);
+  text-shadow: 0 0 6px rgba(57,211,83,0.5);
+}
+
+.channel-list-num {
+  font-weight: bold;
+  color: var(--remote-green);
+  min-width: 28px;
+  text-align: right;
+  opacity: 0.85;
+}
+
+.channel-list-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+
+.remote-footer {
+  font-size: 0.55rem;
+  color: #444;
+  text-align: center;
+  letter-spacing: 0.1em;
+}
+
+/* ---- Responsive: tighter on very small phones ---- */
+@media (max-height: 640px) {
+  .remote-shell {
+    padding: 4px 8px 8px;
+  }
+  .remote-body {
+    gap: 8px;
+    padding: 10px 12px 12px;
+  }
+  .remote-screen {
+    min-height: 44px;
+  }
+  .screen-channel {
+    font-size: 1rem;
+  }
+  .num-btn {
+    padding: 8px 4px;
+  }
+  .vol-btn {
+    padding: 5px 10px;
+  }
+}
+
+/* ---- Ensure full-height usage on modern mobile browsers ---- */
+@supports (height: 100dvh) {
+  .remote-shell {
+    min-height: 100dvh;
+  }
+}
+
+/* ---- iOS "Add to Home Screen" modal ---- */
+.ios-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.ios-modal[hidden] {
+  display: none;
+}
+
+.ios-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.ios-modal-box {
+  position: relative;
+  background: var(--remote-surface, #2a2a2a);
+  border: 1px solid var(--remote-border, #444);
+  border-radius: 12px;
+  padding: 24px 20px 20px;
+  max-width: 340px;
+  width: 100%;
+  color: var(--remote-text, #f0f0f0);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.ios-modal-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0 0 10px;
+  text-align: center;
+  color: var(--remote-accent, #ff4444);
+}
+
+.ios-modal-body {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: 0 0 12px;
+  text-align: center;
+  color: var(--remote-text-dim, #aaa);
+}
+
+.ios-modal-steps {
+  font-size: 0.82rem;
+  line-height: 1.6;
+  margin: 0 0 20px;
+  padding-left: 20px;
+  color: var(--remote-text, #f0f0f0);
+}
+
+.ios-modal-steps li + li {
+  margin-top: 4px;
+}
+
+.ios-share-icon {
+  display: inline-block;
+  font-size: 0.9rem;
+  vertical-align: middle;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 0 3px;
+  line-height: 1.2;
+}
+
+.ios-modal-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.ios-modal-btn {
+  flex: 1;
+  font-size: 0.85rem;
+  padding: 10px 8px;
+}
+
+.ios-modal-btn-primary {
+  background: var(--remote-accent, #ff4444);
+  color: #fff;
+  border-color: var(--remote-accent, #ff4444);
+}
+
+/* ---- iOS modal visual guide (shown after "Show Me How") ---- */
+.ios-guide-arrow-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 12px 0 16px;
+  gap: 4px;
+}
+
+.ios-guide-label {
+  font-size: 0.8rem;
+  color: var(--remote-accent, #ff4444);
+  margin: 0;
+  text-align: center;
+  animation: ios-guide-pulse 1.2s ease-in-out infinite;
+}
+
+.ios-guide-arrow {
+  font-size: 1.6rem;
+  color: var(--remote-accent, #ff4444);
+  animation: ios-guide-bounce 1.2s ease-in-out infinite;
+}
+
+.ios-guide-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1c1c1e;
+  border: 1px solid #3a3a3c;
+  border-radius: 10px;
+  padding: 8px 20px;
+  width: 80%;
+  gap: 12px;
+}
+
+.ios-guide-share-btn {
+  font-size: 1.4rem;
+  color: #0a84ff;
+  background: #2c2c2e;
+  border: 1px solid #3a3a3c;
+  border-radius: 6px;
+  padding: 4px 8px;
+  line-height: 1;
+  animation: ios-guide-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes ios-guide-bounce {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(6px); }
+}
+
+@keyframes ios-guide-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}

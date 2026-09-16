@@ -9,9 +9,14 @@ SERVICE_NAME="retrostation-player"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 OWNERSHIP_MARKER="# Managed-By: RetroStation-Player"
 PORT=5050
+PACKAGE_MANAGER=""
 DISPLAY_MODE="auto"
 DISPLAY_CONNECTOR=""
 ASSUME_YES=false
+ENABLE_AUTH=""
+AUTH_USERNAME=""
+AUTH_PASSWORD=""
+AUTH_MUST_CHANGE=false
 REBOOT_REQUIRED=false
 PURGE=false
 IS_PI_ZERO_W=false
@@ -33,7 +38,7 @@ COMPOSITE_OVERSCAN_SUDOERS="/etc/sudoers.d/retrostation-player-composite-oversca
 usage() {
   cat >&2 <<'USAGE'
 Usage:
-  setup.sh install [--display auto|hdmi|composite|desktop|drm] [--yes]
+  setup.sh install [--display auto|hdmi|composite|desktop|drm] [--auth] [--yes]
   setup.sh uninstall [--purge]
 
 Display modes:
@@ -45,6 +50,7 @@ Display modes:
   drm        Use direct DRM/KMS output without requiring a specific connector.
 
 Options:
+  --auth     Enable local Web UI authentication (prompted if not supplied).
   -y, --yes  Accept detected-hardware optimization and composite
              configuration prompts, including the Pi Zero W streaming notice.
   --purge     With uninstall, also remove configuration, state, service user,
@@ -56,6 +62,37 @@ USAGE
 fatal() {
   echo "Error: $*" >&2
   exit 1
+}
+
+detect_package_manager() {
+  local os_id="" candidate=""
+
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    os_id="${ID:-}"
+    [[ -n "$os_id" ]] || os_id="${ID_LIKE:-}"
+  fi
+
+  for candidate in apt-get dnf yum pacman; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      case "$candidate" in
+        apt-get) PACKAGE_MANAGER="apt" ;;
+        dnf) PACKAGE_MANAGER="dnf" ;;
+        yum) PACKAGE_MANAGER="yum" ;;
+        pacman) PACKAGE_MANAGER="pacman" ;;
+      esac
+      return 0
+    fi
+  done
+
+  case "${os_id:-}" in
+    debian|ubuntu|linuxmint|raspbian) PACKAGE_MANAGER="apt" ; return 0 ;;
+    fedora|rhel|centos|rocky|almalinux) PACKAGE_MANAGER="dnf" ; return 0 ;;
+    arch|manjaro|archarm) PACKAGE_MANAGER="pacman" ; return 0 ;;
+  esac
+
+  fatal "Unsupported Linux distribution or package manager. Install via apt, dnf/yum, or pacman."
 }
 
 parse_args() {
@@ -79,6 +116,10 @@ parse_args() {
             ;;
           -y|--yes)
             ASSUME_YES=true
+            shift
+            ;;
+          --auth)
+            ENABLE_AUTH=true
             shift
             ;;
           -h|--help)
@@ -582,7 +623,6 @@ apply_zero_w_optimizations() {
     echo "Disabled unused console: getty@tty${tty}.service"
   done
 
-  install_startup_screen
 
   cat > "$ZERO_W_TUNING_UNIT" <<'EOF_ZERO_W_UNIT'
 # Managed-By: RetroStation-Player
@@ -626,7 +666,6 @@ apply_pi_3b_optimizations() {
     echo "Disabled unused console: getty@tty${tty}.service"
   done
 
-  install_startup_screen
 
   cat > "$PI_3B_TUNING_UNIT" <<'EOF_PI_3B_UNIT'
 # Managed-By: RetroStation-Player
@@ -669,7 +708,6 @@ apply_pi_3b_plus_optimizations() {
     echo "Disabled unused console: getty@tty${tty}.service"
   done
 
-  install_startup_screen
 
   cat > "$PI_3B_PLUS_TUNING_UNIT" <<'EOF_PI_3B_PLUS_UNIT'
 # Managed-By: RetroStation-Player
@@ -876,18 +914,44 @@ PY
 }
 
 ensure_system_packages() {
-  is_apt_cache_stale() {
-    local apt_update_success_stamp="$1"
-    local max_age_minutes="$2"
-    local recent_update_stamp
+  local package package_name package_manager
+  local update_stamp apt_cache_max_age_24h_minutes
+  local packages=(python3 python3-venv python3-pip mpv alsa-utils socat sudo)
 
-    recent_update_stamp="$(find "$apt_update_success_stamp" -mmin "-$max_age_minutes" -print -quit 2>/dev/null || true)"
-    [[ -z "$recent_update_stamp" ]]
-  }
+  detect_package_manager
+  package_manager="$PACKAGE_MANAGER"
 
-  local required_command package installed_version candidate_version candidate_policy
-  local required_commands=(apt-get apt-cache dpkg-query dpkg)
-  local packages=(python3 python3-venv mpv alsa-utils socat sudo)
+  case "$package_manager" in
+    apt)
+      local required_commands=(apt-get apt-cache dpkg-query dpkg)
+      local package_installed_status="install ok installed"
+      update_stamp="/var/lib/apt/periodic/update-success-stamp"
+      apt_cache_max_age_24h_minutes=1440
+
+      is_apt_cache_stale() {
+        local apt_update_success_stamp="$1"
+        local max_age_minutes="$2"
+        local recent_update_stamp
+
+        recent_update_stamp="$(find "$apt_update_success_stamp" -mmin "-$max_age_minutes" -print -quit 2>/dev/null || true)"
+        [[ -z "$recent_update_stamp" ]]
+      }
+      ;;
+    dnf|yum)
+      local required_commands=(rpm ${package_manager})
+      ;;
+    pacman)
+      local required_commands=(pacman)
+      ;;
+    *)
+      fatal "Unsupported package manager: $package_manager"
+      ;;
+  esac
+
+  for package in "${required_commands[@]}"; do
+    command -v "$package" >/dev/null 2>&1 || fatal "$package is required."
+  done
+
   if [[ ( "$IS_PI_ZERO_W" == true && "$APPLY_ZERO_W_OPTIMIZATIONS" == true ) ||
         ( "$IS_PI_3B" == true && "$APPLY_PI_3B_OPTIMIZATIONS" == true ) ||
         ( "$IS_PI_3B_PLUS" == true && "$APPLY_PI_3B_PLUS_OPTIMIZATIONS" == true ) ]]; then
@@ -899,34 +963,51 @@ ensure_system_packages() {
       packages+=(ffmpeg)
     fi
   fi
-  local package_installed_status="install ok installed"
-  local apt_update_success_stamp="/var/lib/apt/periodic/update-success-stamp"
-  local apt_cache_max_age_24h_minutes=1440
 
-  for required_command in "${required_commands[@]}"; do
-    command -v "$required_command" >/dev/null 2>&1 || fatal "$required_command is required."
-  done
-
-  if is_apt_cache_stale "$apt_update_success_stamp" "$apt_cache_max_age_24h_minutes"; then
-    apt-get update || fatal "Failed to refresh apt package metadata. Check repository configuration and network access."
+  if [[ "$package_manager" == "apt" ]]; then
+    if is_apt_cache_stale "$update_stamp" "$apt_cache_max_age_24h_minutes"; then
+      apt-get update || fatal "Failed to refresh apt package metadata. Check repository configuration and network access."
+    fi
   fi
 
   for package in "${packages[@]}"; do
-    if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q "$package_installed_status"; then
-      DEBIAN_FRONTEND=noninteractive apt-get install -y "$package" || fatal "Failed to install required package: $package"
-      continue
-    fi
+    case "$package_manager" in
+      apt)
+        if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q "$package_installed_status"; then
+          DEBIAN_FRONTEND=noninteractive apt-get install -y "$package" || fatal "Failed to install required package: $package"
+          continue
+        fi
 
-    candidate_policy="$(apt-cache policy "$package" 2>/dev/null)" || fatal "Failed to query apt metadata for package: $package."
-    installed_version="$(dpkg-query -W -f='${Version}' "$package" 2>/dev/null)"
-    candidate_version="$(LC_ALL=C printf '%s\n' "$candidate_policy" | awk '$1 == "Candidate:" {print $2; exit}')"
+        candidate_policy="$(apt-cache policy "$package" 2>/dev/null)" || fatal "Failed to query apt metadata for package: $package."
+        installed_version="$(dpkg-query -W -f='${Version}' "$package" 2>/dev/null)"
+        candidate_version="$(LC_ALL=C printf '%s\n' "$candidate_policy" | awk '$1 == "Candidate:" {print $2; exit}')"
 
-    [[ -n "$candidate_version" && "$candidate_version" != "(none)" ]] || fatal "Unable to determine candidate version for package: $package."
+        [[ -n "$candidate_version" && "$candidate_version" != "(none)" ]] || fatal "Unable to determine candidate version for package: $package."
 
-    if dpkg --compare-versions "$installed_version" lt "$candidate_version"; then
-      DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y "$package" || fatal "Failed to upgrade required package: $package"
-    fi
+        if dpkg --compare-versions "$installed_version" lt "$candidate_version"; then
+          DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y "$package" || fatal "Failed to upgrade required package: $package"
+        fi
+        ;;
+      dnf)
+        if ! rpm -q "$package" >/dev/null 2>&1; then
+          dnf install -y "$package" || fatal "Failed to install required package: $package"
+        fi
+        ;;
+      yum)
+        if ! rpm -q "$package" >/dev/null 2>&1; then
+          yum install -y "$package" || fatal "Failed to install required package: $package"
+        fi
+        ;;
+      pacman)
+        if ! pacman -Q "$package" >/dev/null 2>&1; then
+          pacman -S --noconfirm "$package" || fatal "Failed to install required package: $package"
+        fi
+        ;;
+    esac
   done
+
+  python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' ||
+    fatal "Python 3.10 or later is required. Found: $(python3 --version)"
 }
 
 
@@ -1004,8 +1085,6 @@ else:
         args[0:0] = ["--vo=gpu", "--gpu-context=drm", "--hwdec=no"]
         if mode == "hdmi":
             args.insert(3, f"--audio-device=alsa/{hdmi_audio_device}")
-    else:
-        args.insert(0, "--hwdec=auto-safe")
     data["player_backend"] = "mpv"
     data["player_path"] = legacy_path if legacy_path != "cvlc" else "mpv"
     data["player_extra_args"] = args
@@ -1131,6 +1210,126 @@ EOF_SERVICE
   } > "$SERVICE_FILE"
 }
 
+prompt_auth() {
+  if [[ -z "$ENABLE_AUTH" ]]; then
+    cat <<'AUTH_NOTICE'
+
+Local authentication
+
+RetroStation Player can require a username and password before allowing
+access to the Web UI. This is optional and can be enabled or disabled
+after installation by editing the configuration.
+
+AUTH_NOTICE
+
+    if [[ ! -t 0 ]]; then
+      echo "Non-interactive installation: local authentication not enabled."
+      echo "To enable it after installation, set auth_enabled, auth_username,"
+      echo "and auth_password_hash in $CONFIG_DIR/config.json."
+      ENABLE_AUTH=false
+      return
+    fi
+
+    local answer
+    read -r -p "Enable local authentication? [y/N] " answer
+    case "$answer" in
+      [Yy]|[Yy][Ee][Ss]) ENABLE_AUTH=true ;;
+      *) ENABLE_AUTH=false; return ;;
+    esac
+  fi
+
+  [[ "$ENABLE_AUTH" == true ]] || return 0
+  [[ -t 0 ]] || fatal "Non-interactive installation cannot configure authentication interactively. Use a pre-configured $CONFIG_DIR/config.json or run without --auth."
+
+  local default_answer
+  read -r -p "Use default credentials (username: admin, password: strongpassword123)? [Y/n] " default_answer
+  case "$default_answer" in
+    [Nn]|[Nn][Oo])
+      echo
+      echo "Set up local authentication credentials."
+      echo
+
+      read -r -p "Username [admin]: " AUTH_USERNAME
+      AUTH_USERNAME="${AUTH_USERNAME:-admin}"
+
+      while true; do
+        read -r -s -p "Password: " AUTH_PASSWORD
+        echo
+        [[ -n "$AUTH_PASSWORD" ]] || { echo "Password cannot be empty. Try again."; continue; }
+        local password_confirm
+        read -r -s -p "Confirm password: " password_confirm
+        echo
+        [[ "$AUTH_PASSWORD" == "$password_confirm" ]] && break
+        echo "Passwords do not match. Try again."
+      done
+      AUTH_MUST_CHANGE=false
+      ;;
+    *)
+      AUTH_USERNAME="admin"
+      AUTH_PASSWORD="strongpassword123"
+      AUTH_MUST_CHANGE=true
+      echo
+      echo "Default credentials will be used (username: admin, password: strongpassword123)."
+      echo "Warning: this password is publicly known. You will be required to change it on first login."
+      echo
+      ;;
+  esac
+}
+
+prompt_reboot() {
+  [[ "$REBOOT_REQUIRED" == true ]] || return 0
+
+  echo
+  if [[ ! -t 0 ]]; then
+    echo "A reboot is required for the player services to work correctly."
+    echo "Run: sudo reboot"
+    return 0
+  fi
+
+  local answer
+  read -r -p "Reboot now? [y/N] " answer
+  case "$answer" in
+    [Yy]|[Yy][Ee][Ss]) reboot ;;
+    *)
+      echo "A reboot is required for the player services to work correctly."
+      echo "Run: sudo reboot"
+      ;;
+  esac
+}
+
+configure_auth() {
+  [[ "$ENABLE_AUTH" == true ]] || return 0
+  local password_hash
+
+  [[ -n "$AUTH_USERNAME" ]] || fatal "Authentication username was not collected."
+  [[ -n "$AUTH_PASSWORD" ]] || fatal "Authentication password was not collected."
+
+  # Pass the plaintext password via stdin to avoid exposing it in /proc/<pid>/cmdline.
+  password_hash="$(printf '%s' "$AUTH_PASSWORD" | "$INSTALL_DIR/.venv/bin/python" -c 'import sys; from werkzeug.security import generate_password_hash; print(generate_password_hash(sys.stdin.read()))')" \
+    || fatal "Failed to hash the authentication password."
+
+  # Pass values via environment variables to avoid cmdline exposure and shell/JSON
+  # interpolation pitfalls.
+  RETROSTATION_AUTH_USERNAME="$AUTH_USERNAME" \
+  RETROSTATION_AUTH_PASSWORD_HASH="$password_hash" \
+  RETROSTATION_AUTH_CONFIG_PATH="$CONFIG_DIR/config.json" \
+  RETROSTATION_AUTH_MUST_CHANGE="$AUTH_MUST_CHANGE" \
+    "$INSTALL_DIR/.venv/bin/python" - <<'PYAUTH'
+import json
+import os
+from pathlib import Path
+path = Path(os.environ["RETROSTATION_AUTH_CONFIG_PATH"])
+data = json.loads(path.read_text(encoding="utf-8"))
+data["auth_enabled"] = True
+data["auth_username"] = os.environ["RETROSTATION_AUTH_USERNAME"]
+data["auth_password_hash"] = os.environ["RETROSTATION_AUTH_PASSWORD_HASH"]
+data["auth_must_change_password"] = os.environ["RETROSTATION_AUTH_MUST_CHANGE"].lower() == "true"
+path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+PYAUTH
+
+  echo "Authentication enabled. Username: $AUTH_USERNAME"
+}
+
 cmd_install() {
   [[ "$(uname -s)" == "Linux" ]] || fatal "This installer supports Linux only."
   [[ $EUID -eq 0 ]] || fatal "Run this installer as root (sudo)."
@@ -1146,6 +1345,7 @@ cmd_install() {
   fi
 
   resolve_display_mode
+  prompt_auth
   ensure_system_packages
 
   if [[ "$DISPLAY_MODE" == "composite" ]]; then
@@ -1188,13 +1388,14 @@ cmd_install() {
   ) | tar -xf - -C "$INSTALL_DIR"
 
   python3 -m venv "$INSTALL_DIR/.venv"
-  "$INSTALL_DIR/.venv/bin/pip" install --upgrade pip
-  "$INSTALL_DIR/.venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
+  "$INSTALL_DIR/.venv/bin/python" -m pip install --upgrade pip
+  "$INSTALL_DIR/.venv/bin/python" -m pip install -r "$INSTALL_DIR/requirements.txt"
 
   if [[ ! -f "$CONFIG_DIR/config.json" ]]; then
     cp "$INSTALL_DIR/config.example.json" "$CONFIG_DIR/config.json"
   fi
   configure_player_json
+  configure_auth
 
   chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR" "$STATE_DIR"
   chown root:"$SERVICE_USER" "$CONFIG_DIR" "$CONFIG_DIR/config.json"
@@ -1203,6 +1404,9 @@ cmd_install() {
 
   install_composite_overscan_helper
   install_startup_screen_control_helper
+  # The startup/ready logo service is a core player feature, not a legacy-Pi
+  # optimization. Install it for every supported Raspberry Pi, including Pi 4/5.
+  install_startup_screen
   write_service_file
   apply_zero_w_optimizations
   apply_pi_3b_optimizations
@@ -1227,6 +1431,13 @@ cmd_install() {
   echo "Service: $SERVICE_NAME"
   echo "Display mode: $DISPLAY_MODE"
   echo "Port: $PORT"
+  if [[ "$ENABLE_AUTH" == true ]]; then
+    echo "Authentication: enabled"
+    echo "Username: $AUTH_USERNAME"
+    if [[ "$AUTH_MUST_CHANGE" == true ]]; then
+      echo "Password: $AUTH_PASSWORD"
+    fi
+  fi
   if [[ -n "${PLAYER_HOSTNAME:-}" ]]; then
     echo "Hostname: $PLAYER_HOSTNAME"
   fi
@@ -1266,6 +1477,7 @@ cmd_install() {
       echo "  http://PLAYER-IP:$PORT"
     fi
   fi
+  prompt_reboot
 }
 
 restore_pi_boot_config_for_purge() {

@@ -13,14 +13,15 @@ from retrostation_player.player import MediaPlayer, PlayerError
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_player(tmp_path, monkeypatch) -> MediaPlayer:
+def _make_player(tmp_path, monkeypatch, *, backend: str = "mpv") -> MediaPlayer:
     monkeypatch.setenv("RETROSTATION_PLAYER_STATE_DIR", str(tmp_path))
     return MediaPlayer(
-        backend="mpv",
-        player_path="mpv",
+        backend=backend,
+        player_path="cvlc" if backend == "vlc" else "mpv",
         fullscreen=False,
         extra_args=[],
-        display_mode="desktop",
+        display_mode="composite" if backend == "vlc" else "desktop",
+        display_resolution="480i" if backend == "vlc" else "",
         audio_control_mode="external",
     )
 
@@ -36,6 +37,8 @@ class _FakeProcess:
         self.pid = 12345
         self._exit_event = threading.Event()
         self.returncode = returncode
+        self.terminated = False
+        self.killed = False
 
     def poll(self) -> int | None:
         return self.returncode if self._exit_event.is_set() else None
@@ -45,9 +48,11 @@ class _FakeProcess:
         return self.returncode
 
     def terminate(self) -> None:
+        self.terminated = True
         self._exit_event.set()
 
     def kill(self) -> None:
+        self.killed = True
         self._exit_event.set()
 
     def exit(self) -> None:
@@ -72,8 +77,9 @@ def test_player_initial_failure_state(tmp_path, monkeypatch):
 # Watchdog restarts on unexpected exit
 # ---------------------------------------------------------------------------
 
-def test_watchdog_restarts_after_unexpected_exit(tmp_path, monkeypatch):
-    player = _make_player(tmp_path, monkeypatch)
+@pytest.mark.parametrize("backend", ["mpv", "vlc"])
+def test_watchdog_restarts_after_unexpected_exit(tmp_path, monkeypatch, backend):
+    player = _make_player(tmp_path, monkeypatch, backend=backend)
     channel = _make_channel()
 
     processes = []
@@ -103,8 +109,9 @@ def test_watchdog_restarts_after_unexpected_exit(tmp_path, monkeypatch):
     assert len(processes) >= 2
 
 
-def test_watchdog_increments_failure_count(tmp_path, monkeypatch):
-    player = _make_player(tmp_path, monkeypatch)
+@pytest.mark.parametrize("backend", ["mpv", "vlc"])
+def test_watchdog_increments_failure_count(tmp_path, monkeypatch, backend):
+    player = _make_player(tmp_path, monkeypatch, backend=backend)
     channel = _make_channel()
 
     restart_event = threading.Event()
@@ -129,8 +136,9 @@ def test_watchdog_increments_failure_count(tmp_path, monkeypatch):
     assert player.status()["failure_count"] >= 1
 
 
-def test_watchdog_sets_last_failure_reason(tmp_path, monkeypatch):
-    player = _make_player(tmp_path, monkeypatch)
+@pytest.mark.parametrize("backend", ["mpv", "vlc"])
+def test_watchdog_sets_last_failure_reason(tmp_path, monkeypatch, backend):
+    player = _make_player(tmp_path, monkeypatch, backend=backend)
     channel = _make_channel()
 
     restart_event = threading.Event()
@@ -157,8 +165,9 @@ def test_watchdog_sets_last_failure_reason(tmp_path, monkeypatch):
     assert "1" in reason  # exit code is included
 
 
-def test_watchdog_sets_last_failure_time(tmp_path, monkeypatch):
-    player = _make_player(tmp_path, monkeypatch)
+@pytest.mark.parametrize("backend", ["mpv", "vlc"])
+def test_watchdog_sets_last_failure_time(tmp_path, monkeypatch, backend):
+    player = _make_player(tmp_path, monkeypatch, backend=backend)
     channel = _make_channel()
 
     restart_event = threading.Event()
@@ -183,8 +192,9 @@ def test_watchdog_sets_last_failure_time(tmp_path, monkeypatch):
     assert player.status()["last_failure_time"] is not None
 
 
-def test_watchdog_increments_restart_count(tmp_path, monkeypatch):
-    player = _make_player(tmp_path, monkeypatch)
+@pytest.mark.parametrize("backend", ["mpv", "vlc"])
+def test_watchdog_increments_restart_count(tmp_path, monkeypatch, backend):
+    player = _make_player(tmp_path, monkeypatch, backend=backend)
     channel = _make_channel()
 
     # restart_count is incremented after play() returns in the watchdog.
@@ -223,9 +233,10 @@ def test_watchdog_increments_restart_count(tmp_path, monkeypatch):
 # Intentional stop suppresses restart
 # ---------------------------------------------------------------------------
 
-def test_watchdog_does_not_restart_after_intentional_stop(tmp_path, monkeypatch):
+@pytest.mark.parametrize("backend", ["mpv", "vlc"])
+def test_watchdog_does_not_restart_after_intentional_stop(tmp_path, monkeypatch, backend):
     """stop() must suppress the automatic restart."""
-    player = _make_player(tmp_path, monkeypatch)
+    player = _make_player(tmp_path, monkeypatch, backend=backend)
     channel = _make_channel()
 
     start_calls = []
@@ -254,9 +265,10 @@ def test_watchdog_does_not_restart_after_intentional_stop(tmp_path, monkeypatch)
 # Channel change suppresses previous watchdog
 # ---------------------------------------------------------------------------
 
-def test_watchdog_does_not_restart_after_channel_change(tmp_path, monkeypatch):
+@pytest.mark.parametrize("backend", ["mpv", "vlc"])
+def test_watchdog_does_not_restart_after_channel_change(tmp_path, monkeypatch, backend):
     """Switching to a different channel must suppress the old watchdog."""
-    player = _make_player(tmp_path, monkeypatch)
+    player = _make_player(tmp_path, monkeypatch, backend=backend)
     channel_a = _make_channel("ch1")
     channel_b = _make_channel("ch2")
 
@@ -296,8 +308,9 @@ def test_watchdog_does_not_restart_after_channel_change(tmp_path, monkeypatch):
 # Failure tracking resets when a new channel is selected
 # ---------------------------------------------------------------------------
 
-def test_failure_count_resets_on_new_channel(tmp_path, monkeypatch):
-    player = _make_player(tmp_path, monkeypatch)
+@pytest.mark.parametrize("backend", ["mpv", "vlc"])
+def test_failure_count_resets_on_new_channel(tmp_path, monkeypatch, backend):
+    player = _make_player(tmp_path, monkeypatch, backend=backend)
     channel_a = _make_channel("ch1")
     channel_b = _make_channel("ch2")
 
@@ -344,3 +357,22 @@ def test_status_includes_failure_fields_when_not_playing(tmp_path, monkeypatch):
     status = player.status()
     for key in ("failure_count", "restart_count", "last_failure_reason", "last_failure_time"):
         assert key in status, f"Missing key in status(): {key}"
+
+
+def test_vlc_stop_clears_process_reference(tmp_path, monkeypatch):
+    player = _make_player(tmp_path, monkeypatch, backend="vlc")
+    channel = _make_channel()
+    process = _FakeProcess()
+
+    def fake_start_process(command):
+        player._process = process
+
+    monkeypatch.setattr(player, "_start_process", fake_start_process)
+    monkeypatch.setattr(player, "_build_command", lambda ch: ["cvlc", ch.url])
+
+    player.play(channel)
+    player.stop(clear_channel=True)
+
+    assert player._process is None
+    assert player.status()["playing"] is False
+    assert process.terminated or process.killed

@@ -174,7 +174,7 @@ body.is-playing #player-state { color: var(--teal); }
 @media (max-width: 600px) {
   .brand-header,
   .now-playing { align-items: stretch; flex-direction: column; }
-  .brand-lockup { width: 100%; }
+  .brand-lockup { width: 100%; flex: 0 1 auto; }
   .header-actions { width: 100%; justify-content: space-between; }
   .controls button { flex: 1; }
   .toolbar { flex-wrap: wrap; }
@@ -381,6 +381,34 @@ body.is-muted #mute-button {
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 10px;
+}
+.footer-nav-link {
+  display: inline-block;
+  color: var(--ink);
+  background: var(--cream);
+  border: 1px solid rgba(244, 233, 213, 0.4);
+  padding: 7px 12px;
+  letter-spacing: .06em;
+  font-size: .88rem;
+  text-decoration: none;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.footer-nav-link:hover { background: #fff8e8; }
+.logout-form,
+.remote-logout-form {
+  display: inline-flex;
+  margin: 0;
+}
+.logout-button,
+.remote-logout-btn {
+  color: var(--cream);
+  background: #8f313d;
+  border-color: rgba(227, 93, 106, 0.5);
+}
+.logout-button:hover,
+.remote-logout-btn:hover {
+  background: #a8394a;
 }
 .copyright {
   margin: 0;

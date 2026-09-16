@@ -124,6 +124,7 @@ def collect_system_info() -> dict[str, Any]:
         'machine': machine,
         'manufacturer': manufacturer,
         'is_raspberry_pi': is_raspberry_pi,
+        'raspberry_pi_model': machine if is_raspberry_pi else None,
         'operating_system': os_release.get('PRETTY_NAME') or platform.platform(),
         'kernel': platform.release() or 'Unknown',
         'kernel_architecture': platform.machine() or 'Unknown',

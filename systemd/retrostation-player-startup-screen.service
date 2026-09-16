@@ -1,7 +1,7 @@
 # Managed-By: RetroStation-Player
 [Unit]
 Description=RetroStation Player boot-time startup screen
-Documentation=https://github.com/thehack904/RetroStation-Player-Private
+Documentation=https://github.com/thehack904/RetroStation-Player
 After=local-fs.target systemd-user-sessions.service
 Before=retrostation-player.service
 Conflicts=getty@tty1.service getty@tty2.service serial-getty@tty2.service
